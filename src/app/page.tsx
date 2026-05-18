@@ -1,65 +1,175 @@
-import Image from "next/image";
+"use client";
 
-export default function Home() {
+import Link from "next/link";
+import { useDashboard } from "@/components/DashboardProvider";
+import StatusBadge from "@/components/StatusBadge";
+import { fmtDate, fmtMoney } from "@/lib/format";
+
+export default function CommandCenter() {
+  const { data } = useDashboard();
+  const k = data?.kpis;
+  const jobs = data?.jobs ?? [];
+  const estimates = data?.estimates ?? [];
+  const aging = data?.aging;
+  const totalAging = aging
+    ? aging.current + aging.days_1_30 + aging.days_31_60 + aging.days_61_90 + aging.days_90_plus
+    : 0;
+
+  const openEstimates = estimates.filter((e) =>
+    ["pending", "sent", "needs_follow_up", "draft"].includes(e.status),
+  );
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
+    <div className="page">
+      <div className="kpi-grid">
+        <KPI label="Total Revenue" value={fmtMoney(k?.total_revenue ?? 0)} meta="from completed jobs" />
+        <KPI
+          label="Open Jobs"
+          value={k ? String(k.open_jobs) : "—"}
+          meta={k ? `${k.completed_jobs} completed · ${k.cancelled_jobs} cancelled` : "—"}
         />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
+        <KPI
+          label="AR Balance"
+          value={fmtMoney(k?.ar_balance ?? 0)}
+          valueClass="down"
+          metaClass="down"
+          meta={`${data?.ar?.length ?? 0} unpaid invoices`}
+        />
+        <KPI
+          label="Estimate Pipeline"
+          value={fmtMoney(k?.pipeline_value ?? 0)}
+          meta={`${openEstimates.length} open estimates`}
+        />
+      </div>
+
+      <div className="grid-2 section-gap">
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">Recent Jobs</span>
+            <Link className="card-action" href="/jobs">
+              All jobs →
+            </Link>
+          </div>
+          <div style={{ padding: 0 }}>
+            <table className="data-table">
+              <thead>
+                <tr>
+                  <th>Job #</th><th>Customer</th><th>Status</th><th>Tech</th><th>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {jobs.length === 0 ? (
+                  <tr><td colSpan={5} className="empty">{data ? "No jobs found" : "Loading..."}</td></tr>
+                ) : (
+                  jobs.slice(0, 8).map((j) => (
+                    <tr key={j.id}>
+                      <td className="mono">#{j.number}</td>
+                      <td>{j.customer}</td>
+                      <td><StatusBadge status={j.status} /></td>
+                      <td>{j.tech}</td>
+                      <td className="mono">{j.total != null ? fmtMoney(j.total) : "—"}</td>
+                    </tr>
+                  ))
+                )}
+              </tbody>
+            </table>
+          </div>
         </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
-            />
-            Deploy Now
-          </a>
-          <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
-          >
-            Documentation
-          </a>
+
+        <div className="card">
+          <div className="card-header">
+            <span className="card-title">AR Aging Summary</span>
+            <Link className="card-action" href="/ar">
+              Full AR →
+            </Link>
+          </div>
+          <div className="card-body">
+            {aging ? (
+              <>
+                <AgingRow label="Current" val={aging.current} total={totalAging} color="var(--green)" />
+                <AgingRow label="1–30 days" val={aging.days_1_30} total={totalAging} color="var(--amber)" />
+                <AgingRow label="31–60 days" val={aging.days_31_60} total={totalAging} color="var(--amber)" />
+                <AgingRow label="61–90 days" val={aging.days_61_90} total={totalAging} color="var(--amber)" />
+                <AgingRow label="90+ days" val={aging.days_90_plus} total={totalAging} color="var(--red)" />
+                <div style={{ marginTop: 12, paddingTop: 10, borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", fontSize: 12 }}>
+                  <span style={{ fontWeight: 600, color: "var(--text-2)" }}>Total AR</span>
+                  <span style={{ fontFamily: '"DM Mono", monospace', fontWeight: 600 }}>{fmtMoney(totalAging)}</span>
+                </div>
+              </>
+            ) : (
+              <div className="empty">Loading...</div>
+            )}
+          </div>
         </div>
-      </main>
+      </div>
+
+      <div className="card section-gap">
+        <div className="card-header">
+          <span className="card-title">Open Estimates</span>
+          <Link className="card-action" href="/estimates">
+            All estimates →
+          </Link>
+        </div>
+        <div style={{ padding: 0 }}>
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>Est #</th><th>Customer</th><th>Status</th><th>Value</th><th>Created</th>
+              </tr>
+            </thead>
+            <tbody>
+              {openEstimates.length === 0 ? (
+                <tr><td colSpan={5} className="empty">{data ? "No open estimates" : "Loading..."}</td></tr>
+              ) : (
+                openEstimates.slice(0, 6).map((e) => (
+                  <tr key={e.id}>
+                    <td className="mono">#{e.number}</td>
+                    <td>{e.customer}</td>
+                    <td><StatusBadge status={e.status} /></td>
+                    <td className="mono">{fmtMoney(e.total)}</td>
+                    <td className="mono" style={{ color: "var(--text-2)" }}>{fmtDate(e.created)}</td>
+                  </tr>
+                ))
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function KPI({
+  label,
+  value,
+  meta,
+  valueClass = "",
+  metaClass = "",
+}: {
+  label: string;
+  value: string;
+  meta: string;
+  valueClass?: string;
+  metaClass?: string;
+}) {
+  return (
+    <div className="kpi-card">
+      <div className="kpi-label">{label}</div>
+      <div className={`kpi-value ${valueClass}`}>{value}</div>
+      <div className={`kpi-meta ${metaClass}`}>{meta}</div>
+    </div>
+  );
+}
+
+function AgingRow({ label, val, total, color }: { label: string; val: number; total: number; color: string }) {
+  const pct = total > 0 ? Math.round((val / total) * 100) : 0;
+  return (
+    <div className="aging-row">
+      <span className="aging-label">{label}</span>
+      <div className="aging-bar-wrap">
+        <div className="aging-fill" style={{ width: `${pct}%`, background: color }} />
+      </div>
+      <span className="aging-amt">{fmtMoney(val)}</span>
     </div>
   );
 }

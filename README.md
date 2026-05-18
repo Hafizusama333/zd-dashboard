@@ -1,36 +1,44 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# ZD Maintenance — Command Center
 
-## Getting Started
+Next.js 16 dashboard that pulls live data from HousecallPro and renders the same UI as the original `ZD_Dashboard_Live.html`, without the n8n middleman.
 
-First, run the development server:
+## Setup
 
 ```bash
+npm install
+cp .env.example .env.local      # then edit with your real keys
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open [http://localhost:3000](http://localhost:3000).
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## Environment
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+```bash
+HCP_API_KEY=...                 # required — HousecallPro API key (server-side only)
+HCP_BASE_URL=https://api.housecallpro.com
+ANTHROPIC_API_KEY=...           # optional — enables AI chat panels
+```
 
-## Learn More
+`.env.local` is git-ignored. Keys are read only on the server (route handlers under `src/app/api/`); they never reach the browser.
 
-To learn more about Next.js, take a look at the following resources:
+## Architecture
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+- `GET /api/dashboard` — calls HCP in parallel (`/jobs`, `/estimates`, `/invoices`, `/customers`), normalizes payloads, computes aging + KPIs, returns one JSON blob.
+- `POST /api/chat` — proxies a single Claude message; returns a stub explanation if `ANTHROPIC_API_KEY` is not set.
+- `DashboardProvider` (client) — fetches `/api/dashboard` on mount, exposes data + a `refresh()` action via React context. The "Refresh" button in the topbar calls this.
+- Pages (`/`, `/jobs`, `/estimates`, `/ar`, `/customers`) read from context and render. Chat panels live next to Jobs / Estimates / AR.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+## Notes
 
-## Deploy on Vercel
+- HCP money amounts are returned in cents; the normalizer divides integer values ≥ 100 by 100.
+- Invoices don't carry a `customer` field, so we build a `job_id → customer name` map from jobs and join.
+- Pagination is capped at 5 pages × 100 items per resource. Bump `pageLimit` in `src/app/api/dashboard/route.ts` if you need more history.
+- All HCP status values come with spaces (e.g. `"complete unrated"`). They're normalized to underscores at the boundary; downstream code uses `complete_unrated`, `pro_canceled`, etc.
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+## Build
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+```bash
+npm run build
+npm start
+```
