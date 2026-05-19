@@ -5,8 +5,11 @@ export type Job = {
   address: string;
   status: string;
   tech: string;
+  techId: string | null;
   scheduled: string | null;
   total: number | null;
+  service: string;
+  zip: string;
 };
 
 export type Estimate = {
@@ -15,8 +18,10 @@ export type Estimate = {
   customer: string;
   status: string;
   total: number;
+  service: string;
   created: string | null;
   updated: string | null;
+  daysSinceSent: number;
 };
 
 export type Invoice = {
@@ -27,6 +32,7 @@ export type Invoice = {
   due: string | null;
   daysOverdue: number;
   status: string;
+  service: string;
 };
 
 export type Customer = {
@@ -49,21 +55,76 @@ export type Aging = {
 
 export type KPIs = {
   total_revenue: number;
+  monthly_revenue: number;
   open_jobs: number;
+  jobs_in_progress: number;
+  jobs_this_month: number;
   completed_jobs: number;
   cancelled_jobs: number;
   ar_balance: number;
+  ar_critical: number;
   open_estimates: number;
   pipeline_value: number;
+  collection_rate: number;
+  conversion_rate: number;
+  avg_estimate_value: number;
+  avg_days_to_close: number;
+  gross_margin_pct: number;
+};
+
+export type FireItem = {
+  severity: "critical" | "high" | "medium";
+  message: string;
+  target: "ar" | "jobs" | "estimates" | "emails" | "ap";
+};
+
+export type Contractor = {
+  id: string;
+  name: string;
+  initials: string;
+  role: string;
+  jobs: number;
+  completedJobs: number;
+  completionRate: number;
+  revenue: number;
+  avgJobValue: number;
+  cancelRate: number;
+};
+
+export type ServiceBaseline = {
+  service: string;
+  avg: number;
+  min: number;
+  max: number;
+  sample: number;
+};
+
+export type RouteCluster = {
+  zip: string;
+  jobCount: number;
+  totalValue: number;
+};
+
+export type CashFlow = {
+  collected: number;
+  ar_outstanding: number;
+  ap_due: number;
+  pipeline_30d: number;
+  net_position: number;
 };
 
 export type DashboardData = {
   kpis: KPIs;
+  cashFlow: CashFlow;
+  fireItems: FireItem[];
   jobs: Job[];
   estimates: Estimate[];
   ar: Invoice[];
   aging: Aging;
   customers: Customer[];
+  contractors: Contractor[];
+  baselines: ServiceBaseline[];
+  routeClusters: RouteCluster[];
   fetchedAt: string;
   errors?: Record<string, string>;
 };

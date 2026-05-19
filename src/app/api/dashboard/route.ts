@@ -2,7 +2,12 @@ import { NextResponse } from "next/server";
 import { hcpFetchAll } from "@/lib/hcp";
 import {
   computeAging,
+  computeBaselines,
+  computeCashFlow,
+  computeContractors,
+  computeFireItems,
   computeKPIs,
+  computeRouteClusters,
   normalizeCustomer,
   normalizeEstimate,
   normalizeInvoice,
@@ -37,33 +42,47 @@ export async function GET() {
   const estimates = estimatesRaw.map(normalizeEstimate);
   const customers = customersRaw.map(normalizeCustomer);
 
-  // Map job_id -> customer name to enrich invoices (HCP invoice payload omits customer).
   const jobCustomerMap = new Map<string, string>();
-  for (const j of jobsRaw) {
-    const id = (j as Record<string, unknown>).id as string | undefined;
-    const cust = (j as Record<string, unknown>).customer as Record<string, unknown> | undefined;
-    if (id && cust) {
+  const jobServiceMap = new Map<string, string>();
+  jobsRaw.forEach((j, idx) => {
+    const id = (j as AnyRec).id as string | undefined;
+    if (!id) return;
+    const cust = (j as AnyRec).customer as AnyRec | undefined;
+    if (cust) {
       const first = (cust.first_name as string) || "";
       const last = (cust.last_name as string) || "";
       const name = `${first} ${last}`.trim() || (cust.name as string) || (cust.company as string) || "";
       if (name) jobCustomerMap.set(id, name);
     }
-  }
-  const allInvoices = invoicesRaw.map((r) => normalizeInvoice(r, jobCustomerMap));
+    const svc = jobs[idx]?.service;
+    if (svc) jobServiceMap.set(id, svc);
+  });
+  const allInvoices = invoicesRaw.map((r) => normalizeInvoice(r, jobCustomerMap, jobServiceMap));
 
   const paidStatuses = new Set(["paid", "voided", "void", "refunded"]);
   const ar = allInvoices.filter((inv) => !paidStatuses.has(inv.status) && inv.total > 0);
 
   const aging = computeAging(ar);
-  const kpis = computeKPIs({ jobs, estimates, ar });
+  const agingTotal = aging.current + aging.days_1_30 + aging.days_31_60 + aging.days_61_90 + aging.days_90_plus;
+  const kpis = computeKPIs({ jobs, estimates, ar, agingTotal });
+  const fireItems = computeFireItems({ ar, jobs, estimates });
+  const contractors = computeContractors(jobsRaw, jobs);
+  const baselines = computeBaselines(jobs);
+  const routeClusters = computeRouteClusters(jobs);
+  const cashFlow = computeCashFlow({ kpis, ar, pipeline: kpis.pipeline_value });
 
   const data: DashboardData = {
     kpis,
+    cashFlow,
+    fireItems,
     jobs,
     estimates,
     ar,
     aging,
     customers,
+    contractors,
+    baselines,
+    routeClusters,
     fetchedAt: new Date().toISOString(),
     errors: Object.keys(errors).length ? errors : undefined,
   };

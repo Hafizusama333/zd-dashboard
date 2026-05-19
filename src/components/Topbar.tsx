@@ -6,10 +6,13 @@ import { useDashboard } from "./DashboardProvider";
 
 const titles: Record<string, string> = {
   "/": "Command Center",
+  "/emails": "Email Audit",
   "/jobs": "Jobs & Dispatch",
-  "/estimates": "Estimates",
+  "/estimates": "Estimates & Pricing",
   "/ar": "Accounts Receivable",
-  "/customers": "Customers",
+  "/ap": "Contractor AP",
+  "/contractors": "Contractors",
+  "/pricebook": "Price Book",
 };
 
 export default function Topbar() {
@@ -23,8 +26,9 @@ export default function Topbar() {
         weekday: "short",
         month: "short",
         day: "numeric",
-        year: "numeric",
-      }),
+      }) +
+        " · " +
+        new Date().toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }),
     );
   }, []);
 
@@ -40,9 +44,9 @@ export default function Topbar() {
             <div className={`status-dot ${status}`} />
             <span>{statusText}</span>
           </div>
-          <button className="btn btn-primary" onClick={() => void refresh()}>
-            ↻ Refresh
-          </button>
+          <button className="btn" onClick={() => void refresh()}>↻ Refresh</button>
+          <button className="btn">Export Report</button>
+          <button className="btn btn-primary">+ New Work Order</button>
         </div>
       </div>
       {errorMsg && (

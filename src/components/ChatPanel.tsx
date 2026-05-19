@@ -2,29 +2,54 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useDashboard } from "./DashboardProvider";
+import type { DashboardData } from "@/lib/types";
 
 type Msg = { role: "ai" | "user"; text: string; time: string };
 
-type ContextKey = "jobs" | "estimates" | "ar";
+type ContextKey = "emails" | "jobs" | "estimates" | "ar" | "ap" | "cont" | "pb";
 
 const labelMap: Record<ContextKey, { dept: string; sub: string; intro: string; placeholder: string }> = {
+  emails: {
+    dept: "Emails",
+    sub: "Email & work order audit",
+    intro: "Email audit data is demo only — HCP API does not expose inbox. Wire Gmail OAuth to enable real audit.",
+    placeholder: "Ask about emails...",
+  },
   jobs: {
-    dept: "Jobs",
+    dept: "Dispatch",
     sub: "Jobs & dispatch",
-    intro: "I have access to your live job data. Ask about current jobs, dispatch, technician assignments, or job history.",
-    placeholder: "Ask about jobs...",
+    intro: "Live HCP job data loaded. Ask about overdue jobs, unassigned work orders, or dispatch routes.",
+    placeholder: "Ask about jobs & dispatch...",
   },
   estimates: {
     dept: "Estimates",
     sub: "Estimates & pricing",
-    intro: "I can see your live estimate pipeline. Ask about win rates, follow-ups, or estimates that need attention.",
-    placeholder: "Ask about estimates...",
+    intro: "Live estimate pipeline loaded. Ask about pricing fairness, stale estimates, or win rate.",
+    placeholder: "Ask about estimates & pricing...",
   },
   ar: {
     dept: "AR",
     sub: "Accounts receivable",
-    intro: "I can see your live AR data. I can draft collection emails, identify at-risk accounts, or analyze aging buckets.",
+    intro: "Live AR loaded. Draft collection emails, identify at-risk accounts, or analyze aging buckets.",
     placeholder: "Ask about receivables...",
+  },
+  ap: {
+    dept: "AP",
+    sub: "Contractor payables",
+    intro: "AP data is demo (Google Form integration not wired). Ask about variance investigations or pay reports.",
+    placeholder: "Ask about contractor payments...",
+  },
+  cont: {
+    dept: "Contractors",
+    sub: "Contractor performance",
+    intro: "Contractor scorecard derived from HCP assigned_employees. Ask about top performers, margins, or pricing.",
+    placeholder: "Ask about contractors...",
+  },
+  pb: {
+    dept: "Price Book",
+    sub: "Price book & margins",
+    intro: "Service baselines derived from completed jobs in HCP. Ask about pricing recommendations or margin analysis.",
+    placeholder: "Ask about pricing & margins...",
   },
 };
 
@@ -51,13 +76,13 @@ export default function ChatPanel({
   const send = async (text: string) => {
     const trimmed = text.trim();
     if (!trimmed || busy) return;
-    setMsgs((m) => [...m, { role: "user", text: trimmed, time: "Just now" }]);
+    setMsgs((m) => [...m, { role: "user", text: trimmed, time: "Just now · Phillip" }]);
     setInput("");
     setBusy(true);
     setMsgs((m) => [...m, { role: "ai", text: "Thinking...", time: "" }]);
 
     const ctxData = buildContext(context, data);
-    const system = `You are a business intelligence assistant for ZD Maintenance, a property maintenance company. You have live HousecallPro data. Be concise, specific, and reference dollar amounts and numbers. Focus on: ${meta.sub}. Live data: ${ctxData}`;
+    const system = `You are a business intelligence assistant for ZD Maintenance, a property maintenance company in Charlotte NC (roofing, flooring, painting, handyman). You have live HousecallPro data. Be concise, specific, and reference dollar amounts and numbers. Focus on: ${meta.sub}. Live data: ${ctxData}`;
 
     try {
       const res = await fetch("/api/chat", {
@@ -91,7 +116,7 @@ export default function ChatPanel({
           <div className={`msg ${m.role}`} key={i}>
             <div className={`bubble ${m.role}`}>
               {m.text.split("\n").map((line, j) => (
-                <div key={j}>{line || " "}</div>
+                <div key={j}>{line || " "}</div>
               ))}
             </div>
             {m.time && <div className="msg-time">{m.time}</div>}
@@ -127,13 +152,25 @@ export default function ChatPanel({
   );
 }
 
-function buildContext(ctx: ContextKey, data: ReturnType<typeof useDashboard>["data"]): string {
+function buildContext(ctx: ContextKey, data: DashboardData | null): string {
   if (!data) return "No live data loaded yet.";
   if (ctx === "jobs") {
-    return `Jobs (${data.jobs.length} total): ${JSON.stringify(data.jobs.slice(0, 15))}`;
+    return `Jobs (${data.jobs.length}): ${JSON.stringify(data.jobs.slice(0, 15))}. Route clusters: ${JSON.stringify(data.routeClusters)}`;
   }
   if (ctx === "estimates") {
-    return `Estimates (${data.estimates.length}): ${JSON.stringify(data.estimates.slice(0, 15))}. KPIs: ${JSON.stringify(data.kpis)}`;
+    return `Estimates (${data.estimates.length}): ${JSON.stringify(data.estimates.slice(0, 15))}. Baselines: ${JSON.stringify(data.baselines)}. KPIs: ${JSON.stringify(data.kpis)}`;
   }
-  return `AR (${data.ar.length} unpaid): ${JSON.stringify(data.ar.slice(0, 15))}. Aging: ${JSON.stringify(data.aging)}. KPIs: ${JSON.stringify(data.kpis)}`;
+  if (ctx === "ar") {
+    return `AR (${data.ar.length} unpaid): ${JSON.stringify(data.ar.slice(0, 15))}. Aging: ${JSON.stringify(data.aging)}`;
+  }
+  if (ctx === "cont") {
+    return `Contractors: ${JSON.stringify(data.contractors)}. Baselines: ${JSON.stringify(data.baselines)}`;
+  }
+  if (ctx === "pb") {
+    return `Service baselines: ${JSON.stringify(data.baselines)}. Total revenue: ${data.kpis.total_revenue}`;
+  }
+  if (ctx === "ap") {
+    return `AP demo data only. Contractors loaded: ${JSON.stringify(data.contractors)}`;
+  }
+  return `Demo email audit data.`;
 }
