@@ -41,7 +41,8 @@ export default function APPage() {
   return (
     <div className="page">
       <div className="demo-banner">
-        ⚠ Demo data — AP submissions normally come from a Google Form. Wire Google Sheets API to connect real data.
+        ⚠ Demo data — AP submissions normally come from a Google Form. Once wired, each submission is cross-referenced against HCP jobs by{" "}
+        <b>address + contractor tag + status=completed</b>. Wire Google Sheets API to connect real data.
       </div>
       <div className="grid-chat">
         <div>

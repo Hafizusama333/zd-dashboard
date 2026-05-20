@@ -49,4 +49,20 @@ export async function hcpFetchAll<T = unknown>(
   return all;
 }
 
+export type HCPLineItem = {
+  id: string;
+  name: string;
+  description?: string;
+  kind: string;
+  unit_cost: number;
+  unit_price: number;
+  quantity: number;
+  amount: number;
+};
+
+export async function hcpJobLineItems(jobId: string): Promise<HCPLineItem[]> {
+  const data = await hcpFetch<{ data?: HCPLineItem[] }>(`/jobs/${jobId}/line_items`);
+  return data.data || [];
+}
+
 export { hcpFetch };

@@ -43,6 +43,33 @@ export type Customer = {
   phone: string;
   tags: string[];
   created: string | null;
+  isBusiness: boolean;
+};
+
+export type LineItem = {
+  id: string;
+  name: string;
+  kind: string;
+  unitCost: number;
+  unitPrice: number;
+  quantity: number;
+  amount: number;
+};
+
+export type MaterialJob = {
+  jobId: string;
+  number: string;
+  customer: string;
+  address: string;
+  status: string;
+  completedAt: string | null;
+  total: number;
+  laborCost: number;
+  laborPrice: number;
+  taxAmount: number;
+  margin: number;
+  marginPct: number;
+  items: LineItem[];
 };
 
 export type Aging = {
@@ -125,6 +152,14 @@ export type DashboardData = {
   contractors: Contractor[];
   baselines: ServiceBaseline[];
   routeClusters: RouteCluster[];
+  materialJobs: MaterialJob[];
+  lucasMaterialSummary: {
+    totalLaborCost: number;
+    totalRevenue: number;
+    totalMargin: number;
+    jobCount: number;
+    avgMarginPct: number;
+  };
   fetchedAt: string;
   errors?: Record<string, string>;
 };

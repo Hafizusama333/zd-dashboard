@@ -12,6 +12,8 @@ const titles: Record<string, string> = {
   "/ar": "Accounts Receivable",
   "/ap": "Contractor AP",
   "/contractors": "Contractors",
+  "/customers": "Customers",
+  "/materials": "Material Costs",
   "/pricebook": "Price Book",
 };
 

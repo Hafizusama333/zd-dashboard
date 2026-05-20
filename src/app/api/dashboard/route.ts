@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
-import { hcpFetchAll } from "@/lib/hcp";
+import { hcpFetchAll, hcpJobLineItems } from "@/lib/hcp";
 import {
+  buildMaterialJob,
   computeAging,
   computeBaselines,
   computeCashFlow,
@@ -8,12 +9,14 @@ import {
   computeFireItems,
   computeKPIs,
   computeRouteClusters,
+  isLucasJob,
   normalizeCustomer,
   normalizeEstimate,
   normalizeInvoice,
   normalizeJob,
+  summarizeMaterials,
 } from "@/lib/normalize";
-import type { DashboardData } from "@/lib/types";
+import type { DashboardData, MaterialJob } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -71,6 +74,30 @@ export async function GET() {
   const routeClusters = computeRouteClusters(jobs);
   const cashFlow = computeCashFlow({ kpis, ar, pipeline: kpis.pipeline_value });
 
+  // Fetch line items for Lucas's most recent jobs (limit to keep latency reasonable).
+  const lucasIndices: number[] = [];
+  jobsRaw.forEach((j, i) => {
+    if (isLucasJob(j)) lucasIndices.push(i);
+  });
+  const MATERIAL_JOB_LIMIT = 30;
+  const target = lucasIndices.slice(0, MATERIAL_JOB_LIMIT);
+  const materialJobs: MaterialJob[] = (
+    await Promise.all(
+      target.map(async (i) => {
+        const j = jobsRaw[i];
+        const id = (j as AnyRec).id as string;
+        try {
+          const items = await hcpJobLineItems(id);
+          return buildMaterialJob(j, jobs[i], items);
+        } catch (e) {
+          errors[`line_items_${id}`] = e instanceof Error ? e.message : String(e);
+          return null;
+        }
+      }),
+    )
+  ).filter((x): x is MaterialJob => !!x);
+  const lucasMaterialSummary = summarizeMaterials(materialJobs);
+
   const data: DashboardData = {
     kpis,
     cashFlow,
@@ -83,6 +110,8 @@ export async function GET() {
     contractors,
     baselines,
     routeClusters,
+    materialJobs,
+    lucasMaterialSummary,
     fetchedAt: new Date().toISOString(),
     errors: Object.keys(errors).length ? errors : undefined,
   };

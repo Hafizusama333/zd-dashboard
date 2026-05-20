@@ -8,9 +8,12 @@ import type {
   Invoice,
   Job,
   KPIs,
+  LineItem,
+  MaterialJob,
   RouteCluster,
   ServiceBaseline,
 } from "./types";
+import type { HCPLineItem } from "./hcp";
 
 type AnyRec = Record<string, unknown>;
 
@@ -70,15 +73,26 @@ const guessService = (description: string): string => {
   return "Other";
 };
 
+const ZD_GENERIC_ID = "pro_ace920fd9c4344e78367974cf1e4b5d5";
+
 export function normalizeJob(raw: AnyRec): Job {
   const customer = pick<AnyRec>(raw, "customer") || {};
   const address = pick<AnyRec>(raw, "address", "service_address") || {};
   const assigned = pick<AnyRec[]>(raw, "assigned_employees") || [];
   const first = assigned[0];
-  const tech = first
+  const employeeName = first
     ? `${s(pick(first, "first_name"))} ${s(pick(first, "last_name"))}`.trim() || "—"
     : "—";
-  const techId = first ? s(pick(first, "id")) || null : null;
+  let techId = first ? s(pick(first, "id")) || null : null;
+  // When job is assigned to generic "ZD Maintenance" the real contractor name is in job-level tags.
+  let tech = employeeName;
+  if (techId === ZD_GENERIC_ID || /^zd\s*maintenance$/i.test(employeeName)) {
+    const jobTags = pick<unknown[]>(raw, "tags") || [];
+    const tagNames = jobTags.map((t) => (typeof t === "string" ? t : s((t as AnyRec).name))).filter(Boolean);
+    const contractorTag = tagNames.find((t) => t && !/quality|control|handyman|carpentor|painter|plumber/i.test(t));
+    if (contractorTag) tech = contractorTag;
+    else if (tagNames.length) tech = tagNames[0];
+  }
   const schedule = pick<AnyRec>(raw, "schedule") || {};
   const description = s(pick(raw, "description", "note", "notes"));
   return {
@@ -157,14 +171,16 @@ export function normalizeCustomer(raw: AnyRec): Customer {
   const tagList: string[] = Array.isArray(tags)
     ? tags.map((t) => (typeof t === "string" ? t : s((t as AnyRec).name)))
     : [];
+  const company = s(pick(raw, "company"));
   return {
     id: s(pick(raw, "id", "uuid")),
     name: `${s(pick(raw, "first_name"))} ${s(pick(raw, "last_name"))}`.trim() || s(pick(raw, "name"), "—"),
-    company: s(pick(raw, "company")),
+    company,
     email: s(pick(raw, "email")),
     phone,
     tags: tagList,
     created: (pick(raw, "created_at", "created") as string) || null,
+    isBusiness: !!company,
   };
 }
 
@@ -413,6 +429,61 @@ export function computeRouteClusters(jobs: Job[]): RouteCluster[] {
     .filter((c) => c.jobCount >= 2)
     .sort((a, b) => b.totalValue - a.totalValue)
     .slice(0, 5);
+}
+
+export const LUCAS_EMPLOYEE_ID = "pro_4c8790abf70e4ada9b2dedc4e95128b1";
+
+export function isLucasJob(jobRaw: AnyRec): boolean {
+  const assigned = (jobRaw.assigned_employees as AnyRec[]) || [];
+  return assigned.some((e) => s(e.id) === LUCAS_EMPLOYEE_ID);
+}
+
+export function buildMaterialJob(
+  jobRaw: AnyRec,
+  normalized: Job,
+  items: HCPLineItem[],
+): MaterialJob {
+  const li: LineItem[] = items.map((it) => ({
+    id: s(it.id),
+    name: s(it.name),
+    kind: s(it.kind),
+    unitCost: money(it.unit_cost),
+    unitPrice: money(it.unit_price),
+    quantity: n(it.quantity),
+    amount: money(it.amount),
+  }));
+  const laborItems = li.filter((i) => i.kind === "labor");
+  const taxItems = li.filter((i) => i.kind === "tax");
+  const laborCost = laborItems.reduce((a, b) => a + b.unitCost * b.quantity, 0);
+  const laborPrice = laborItems.reduce((a, b) => a + b.amount, 0);
+  const taxAmount = taxItems.reduce((a, b) => a + b.amount, 0);
+  const total = normalized.total || 0;
+  const margin = laborPrice - laborCost;
+  const marginPct = laborPrice > 0 ? (margin / laborPrice) * 100 : 0;
+  return {
+    jobId: normalized.id,
+    number: normalized.number,
+    customer: normalized.customer,
+    address: normalized.address,
+    status: normalized.status,
+    completedAt: (pick(jobRaw, "work_timestamps.completed_at") as string) || null,
+    total,
+    laborCost,
+    laborPrice,
+    taxAmount,
+    margin,
+    marginPct,
+    items: li,
+  };
+}
+
+export function summarizeMaterials(jobs: MaterialJob[]) {
+  const totalLaborCost = jobs.reduce((a, j) => a + j.laborCost, 0);
+  const totalRevenue = jobs.reduce((a, j) => a + j.laborPrice, 0);
+  const totalMargin = totalRevenue - totalLaborCost;
+  const jobCount = jobs.length;
+  const avgMarginPct = totalRevenue > 0 ? (totalMargin / totalRevenue) * 100 : 0;
+  return { totalLaborCost, totalRevenue, totalMargin, jobCount, avgMarginPct };
 }
 
 export function computeCashFlow(args: { kpis: KPIs; ar: Invoice[]; pipeline: number }): CashFlow {
