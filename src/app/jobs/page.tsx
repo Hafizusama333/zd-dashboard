@@ -9,6 +9,9 @@ import type { Job } from "@/lib/types";
 
 type Filter = "all" | "in_progress" | "needs_scheduling" | "overdue";
 
+const fmtAge = (hours: number): string =>
+  hours <= 0 ? "—" : hours >= 48 ? `${Math.floor(hours / 24)}d` : `${Math.round(hours)}h`;
+
 export default function JobsPage() {
   const { data } = useDashboard();
   const jobs = data?.jobs ?? [];
@@ -38,7 +41,10 @@ export default function JobsPage() {
     ).length,
   };
 
-  const needsScheduling = jobs.filter((j) => j.status === "needs_scheduling").slice(0, 10);
+  const needsScheduling = jobs
+    .filter((j) => j.status === "needs_scheduling")
+    .sort((a, b) => b.hoursUnscheduled - a.hoursUnscheduled)
+    .slice(0, 15);
   const inProgress = jobs.filter((j) => j.status === "in_progress").slice(0, 10);
   const filtered = jobs.filter(filterFn).slice(0, 50);
 
@@ -63,18 +69,23 @@ export default function JobsPage() {
                 <div style={{ padding: 0 }}>
                   <table className="data-table">
                     <thead>
-                      <tr><th>WO #</th><th>Customer</th><th>Service</th><th>Address</th><th>Value</th><th>Contractor</th></tr>
+                      <tr><th>WO #</th><th>Customer</th><th>Service</th><th>Address</th><th>Unscheduled For</th><th>Value</th><th>Contractor</th></tr>
                     </thead>
                     <tbody>
                       {needsScheduling.length === 0 ? (
-                        <tr><td colSpan={6} className="empty">{data ? "Nothing needs scheduling" : "Loading..."}</td></tr>
+                        <tr><td colSpan={7} className="empty">{data ? "Nothing needs scheduling" : "Loading..."}</td></tr>
                       ) : (
-                        needsScheduling.map((j) => (
-                          <tr key={j.id}>
+                        needsScheduling.map((j) => {
+                          const stale = j.hoursUnscheduled >= 72;
+                          return (
+                          <tr key={j.id} style={stale ? { background: "var(--red-light)" } : undefined}>
                             <td className="mono">#{j.number}</td>
                             <td>{j.customer}</td>
                             <td>{j.service}</td>
                             <td style={{ fontSize: 11, color: "var(--text-2)" }}>{j.address}</td>
+                            <td className="mono" style={{ color: stale ? "var(--red)" : "var(--amber)", fontWeight: stale ? 600 : 400 }}>
+                              {fmtAge(j.hoursUnscheduled)}{stale ? " ⚠" : ""}
+                            </td>
                             <td className="mono">{fmtMoney(j.total)}</td>
                             <td>
                               {j.tech === "—" ? (
@@ -84,7 +95,8 @@ export default function JobsPage() {
                               )}
                             </td>
                           </tr>
-                        ))
+                          );
+                        })
                       )}
                     </tbody>
                   </table>

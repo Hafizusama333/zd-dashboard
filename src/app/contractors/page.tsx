@@ -40,7 +40,13 @@ export default function ContractorsPage() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Contractor</th><th>Jobs</th><th>Complete%</th><th>Revenue</th><th>Avg Job Val</th><th>Cancel%</th><th>Flag</th>
+                    <th>Contractor</th>
+                    <th>Scheduled Now</th>
+                    <th>Completed</th>
+                    <th>Complete%</th>
+                    <th>Revenue</th>
+                    <th>Avg Job Val</th>
+                    <th>Flag</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -61,11 +67,17 @@ export default function ContractorsPage() {
                               </div>
                             </div>
                           </td>
-                          <td>{c.jobs}</td>
+                          <td>
+                            {c.scheduledJobs} jobs
+                            <span style={{ fontSize: 11, color: "var(--text-2)" }}> · {c.scheduledEstimates} est</span>
+                          </td>
+                          <td>
+                            {c.completedJobs} jobs
+                            <span style={{ fontSize: 11, color: "var(--text-2)" }}> · {c.completedEstimates} est</span>
+                          </td>
                           <td><span className={`badge ${comp.cls}`}>{comp.label}</span></td>
                           <td className="mono">{fmtMoney(c.revenue)}</td>
                           <td className="mono">{fmtMoney(c.avgJobValue)}</td>
-                          <td>{c.cancelRate.toFixed(0)}%</td>
                           <td>{flag ? <span className={`badge ${flag.cls}`}>{flag.label}</span> : "—"}</td>
                         </tr>
                       );

@@ -6,6 +6,7 @@ import {
   computeBaselines,
   computeCashFlow,
   computeContractors,
+  computeCustomerStats,
   computeFireItems,
   computeKPIs,
   computeRouteClusters,
@@ -52,9 +53,10 @@ export async function GET() {
     if (!id) return;
     const cust = (j as AnyRec).customer as AnyRec | undefined;
     if (cust) {
+      // Business customer (company) wins, matching normalize.customerName.
       const first = (cust.first_name as string) || "";
       const last = (cust.last_name as string) || "";
-      const name = `${first} ${last}`.trim() || (cust.name as string) || (cust.company as string) || "";
+      const name = (cust.company as string) || `${first} ${last}`.trim() || (cust.name as string) || "";
       if (name) jobCustomerMap.set(id, name);
     }
     const svc = jobs[idx]?.service;
@@ -69,7 +71,8 @@ export async function GET() {
   const agingTotal = aging.current + aging.days_1_30 + aging.days_31_60 + aging.days_61_90 + aging.days_90_plus;
   const kpis = computeKPIs({ jobs, estimates, ar, agingTotal });
   const fireItems = computeFireItems({ ar, jobs, estimates });
-  const contractors = computeContractors(jobsRaw, jobs);
+  const contractors = computeContractors(jobsRaw, jobs, estimatesRaw, estimates);
+  const customerStats = computeCustomerStats(jobs, estimates);
   const baselines = computeBaselines(jobs);
   const routeClusters = computeRouteClusters(jobs);
   const cashFlow = computeCashFlow({ kpis, ar, pipeline: kpis.pipeline_value });
@@ -107,6 +110,7 @@ export async function GET() {
     ar,
     aging,
     customers,
+    customerStats,
     contractors,
     baselines,
     routeClusters,

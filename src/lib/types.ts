@@ -10,7 +10,11 @@ export type Job = {
   total: number | null;
   service: string;
   zip: string;
+  createdAt: string | null;
+  hoursUnscheduled: number;
 };
+
+export type EstimateBucket = "unscheduled" | "scheduled" | "completed" | "won" | "canceled" | "other";
 
 export type Estimate = {
   id: string;
@@ -22,6 +26,8 @@ export type Estimate = {
   created: string | null;
   updated: string | null;
   daysSinceSent: number;
+  hoursWaiting: number;
+  bucket: EstimateBucket;
 };
 
 export type Invoice = {
@@ -112,10 +118,26 @@ export type Contractor = {
   role: string;
   jobs: number;
   completedJobs: number;
+  scheduledJobs: number;
+  estimates: number;
+  completedEstimates: number;
+  scheduledEstimates: number;
   completionRate: number;
   revenue: number;
   avgJobValue: number;
   cancelRate: number;
+};
+
+export type CustomerStat = {
+  name: string;
+  jobs: number;
+  jobsThisWeek: number;
+  completedJobs: number;
+  revenue: number;
+  avgJobValue: number;
+  estimates: number;
+  wonEstimates: number;
+  conversionRate: number;
 };
 
 export type ServiceBaseline = {
@@ -149,6 +171,7 @@ export type DashboardData = {
   ar: Invoice[];
   aging: Aging;
   customers: Customer[];
+  customerStats: CustomerStat[];
   contractors: Contractor[];
   baselines: ServiceBaseline[];
   routeClusters: RouteCluster[];

@@ -82,7 +82,9 @@ export default function ChatPanel({
     setMsgs((m) => [...m, { role: "ai", text: "Thinking...", time: "" }]);
 
     const ctxData = buildContext(context, data);
-    const system = `You are a business intelligence assistant for ZD Maintenance, a property maintenance company in Charlotte NC (roofing, flooring, painting, handyman). You have live HousecallPro data. Be concise, specific, and reference dollar amounts and numbers. Focus on: ${meta.sub}. Live data: ${ctxData}`;
+    const system = `You are a business intelligence assistant for ZD Maintenance, a property maintenance company in Charlotte NC (plumbing, electrical, handyman, roofing, flooring, painting). You have live HousecallPro data. Be concise, specific, and reference dollar amounts and numbers. Focus on: ${meta.sub}. Live data: ${ctxData}
+
+Formatting rules: respond in plain, easy-to-read prose. Do NOT use markdown tables, asterisks, bold, bullet symbols, or horizontal rules (---). Write short, clear sentences. If you must list items, use a simple numbered list with plain text.`;
 
     try {
       const res = await fetch("/api/chat", {

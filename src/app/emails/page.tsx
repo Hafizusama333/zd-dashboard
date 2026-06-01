@@ -1,6 +1,18 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import ChatPanel from "@/components/ChatPanel";
+import { fmtDate } from "@/lib/format";
+
+type LiveEmail = {
+  uid: number;
+  from: string;
+  fromEmail: string;
+  subject: string;
+  date: string | null;
+  seen: boolean;
+  ageHours: number;
+};
 
 type EmailRow = {
   from: string;
@@ -29,17 +41,102 @@ const VALIDATION = [
   { email: "Hargrove · roof quote", worker: "—", tag: "No WO created", status: "Missing", statusClass: "badge-red" },
 ];
 
+// Demo dates are relative strings ("26h ago", "1d ago"); parse to hours for sorting.
+const ageHours = (d: string): number => {
+  const m = d.match(/(\d+)\s*([hd])/);
+  if (!m) return 0;
+  const n = parseInt(m[1], 10);
+  return m[2] === "d" ? n * 24 : n;
+};
+
+const fmtAge = (hours: number): string =>
+  hours <= 0 ? "—" : hours >= 48 ? `${Math.floor(hours / 24)}d` : `${Math.round(hours)}h`;
+
 export default function EmailsPage() {
+  // Oldest (longest unanswered) first so priority is at the top.
+  const sortedEmails = [...EMAILS].sort((a, b) => ageHours(b.date) - ageHours(a.date));
+
+  const [live, setLive] = useState<LiveEmail[] | null>(null);
+  const [liveState, setLiveState] = useState<"loading" | "live" | "stub" | "error">("loading");
+  const [liveMsg, setLiveMsg] = useState<string>("");
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch("/api/emails", { cache: "no-store" });
+        const json = (await res.json()) as { stub?: boolean; reason?: string; error?: string; emails?: LiveEmail[] };
+        if (cancelled) return;
+        if (json.error) { setLiveState("error"); setLiveMsg(json.error); return; }
+        if (json.stub) { setLiveState("stub"); setLiveMsg(json.reason || "Gmail not configured."); return; }
+        setLive(json.emails || []);
+        setLiveState("live");
+      } catch (e) {
+        if (!cancelled) { setLiveState("error"); setLiveMsg(e instanceof Error ? e.message : "fetch failed"); }
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const useLive = liveState === "live" && live;
+
   return (
     <div className="page">
-      <div className="demo-banner">
-        ⚠ Demo data — HousecallPro API does not expose an inbox endpoint. Wire Gmail OAuth to enable real email audit.
-      </div>
+      {!useLive && (
+        <div className="demo-banner">
+          {liveState === "loading"
+            ? "Connecting to Gmail inbox…"
+            : liveState === "error"
+            ? `⚠ Email fetch error: ${liveMsg}`
+            : `⚠ Demo data — ${liveMsg}`}
+        </div>
+      )}
+      {useLive && (
+        <div className="card section-gap">
+          <div className="card-header">
+            <span className="card-title">Live Inbox — Inbound (oldest first)</span>
+            <span style={{ fontSize: 11, color: "var(--text-2)" }}>{live!.length} emails · Gmail IMAP</span>
+          </div>
+          <div className="table-scroll" style={{ padding: 0 }}>
+            <table className="data-table">
+              <thead>
+                <tr><th></th><th>From</th><th>Subject</th><th>Received</th><th>Waiting</th><th>Status</th></tr>
+              </thead>
+              <tbody>
+                {live!.length === 0 ? (
+                  <tr><td colSpan={6} className="empty">Inbox empty</td></tr>
+                ) : (
+                  live!.map((e) => {
+                    const stale = !e.seen && e.ageHours >= 24;
+                    return (
+                      <tr key={e.uid} style={stale ? { background: "var(--red-light)" } : undefined}>
+                        <td><div className="dot" style={{ background: e.seen ? "var(--text-3)" : "var(--blue)" }} /></td>
+                        <td><b>{e.from}</b><div style={{ fontSize: 11, color: "var(--text-2)" }}>{e.fromEmail}</div></td>
+                        <td>{e.subject}</td>
+                        <td className="mono" style={{ color: "var(--text-2)" }}>{fmtDate(e.date)}</td>
+                        <td className="mono" style={{ color: stale ? "var(--red)" : "inherit", fontWeight: stale ? 600 : 400 }}>
+                          {fmtAge(e.ageHours)}{stale ? " ⚠" : ""}
+                        </td>
+                        <td>
+                          {e.seen
+                            ? <span className="badge badge-gray">Read</span>
+                            : <span className="badge badge-amber">Unread</span>}
+                        </td>
+                      </tr>
+                    );
+                  })
+                )}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
       <div className="grid-chat">
         <div>
+          {!useLive && (
           <div className="card section-gap">
             <div className="card-header">
-              <span className="card-title">Email Audit — All Inbound</span>
+              <span className="card-title">Email Audit — All Inbound (demo)</span>
               <button className="action-btn primary">Run Full Audit</button>
             </div>
             <div style={{ padding: 0 }}>
@@ -64,7 +161,7 @@ export default function EmailsPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {EMAILS.map((e, i) => (
+                  {sortedEmails.map((e, i) => (
                     <tr key={i} style={e.rowClass ? { background: "var(--red-light)" } : undefined}>
                       <td><div className="dot" style={{ background: "var(--blue)" }} /></td>
                       <td><b>{e.from}</b></td>
@@ -85,7 +182,9 @@ export default function EmailsPage() {
               </table>
             </div>
           </div>
+          )}
 
+          {!useLive && (
           <div className="card">
             <div className="card-header">
               <span className="card-title">Worker-to-Email Content Validation</span>
@@ -112,6 +211,7 @@ export default function EmailsPage() {
               </table>
             </div>
           </div>
+          )}
         </div>
 
         <ChatPanel

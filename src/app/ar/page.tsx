@@ -1,9 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import AgingRow from "@/components/AgingRow";
 import ChatPanel from "@/components/ChatPanel";
 import { useDashboard } from "@/components/DashboardProvider";
 import { fmtDate, fmtMoney } from "@/lib/format";
+
+type ARFilter = "all" | "overdue30";
 
 export default function ARPage() {
   const { data } = useDashboard();
@@ -13,6 +16,29 @@ export default function ARPage() {
   const total = aging
     ? aging.current + aging.days_1_30 + aging.days_31_60 + aging.days_61_90 + aging.days_90_plus
     : 0;
+
+  const [filter, setFilter] = useState<ARFilter>("all");
+  // HCP invoice-drafting range: fiscal-year start through today−30 (so only 30+ days due show).
+  const [startDate, setStartDate] = useState("2026-01-01");
+  const [endDate, setEndDate] = useState(() => {
+    const d = new Date(Date.now() - 30 * 86400000);
+    return d.toISOString().slice(0, 10);
+  });
+
+  const inRange = (due: string | null): boolean => {
+    if (!due) return true; // no due date — don't exclude
+    const t = new Date(due).getTime();
+    const s = startDate ? new Date(startDate).getTime() : -Infinity;
+    const e = endDate ? new Date(endDate).getTime() + 86400000 : Infinity;
+    return t >= s && t <= e;
+  };
+
+  const visible = ar.filter((inv) => {
+    if (filter === "overdue30" && inv.daysOverdue < 30) return false;
+    if (filter === "overdue30" && !inRange(inv.due)) return false;
+    return true;
+  });
+  const overdue30Count = ar.filter((i) => i.daysOverdue >= 30).length;
 
   return (
     <div className="page">
@@ -51,6 +77,26 @@ export default function ARPage() {
               <span className="card-title">Open Invoices</span>
               <button className="action-btn primary">Draft all collection emails →</button>
             </div>
+            <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
+              <div className="filter-tabs" style={{ marginBottom: 0 }}>
+                <button className={`ftab${filter === "all" ? " on" : ""}`} onClick={() => setFilter("all")}>
+                  All Open ({ar.length})
+                </button>
+                <button className={`ftab${filter === "overdue30" ? " on" : ""}`} onClick={() => setFilter("overdue30")}>
+                  30+ Days Due ({overdue30Count})
+                </button>
+              </div>
+              {filter === "overdue30" && (
+                <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 11, color: "var(--text-2)" }}>
+                  <span>Invoice due date:</span>
+                  <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)}
+                    style={{ padding: "4px 6px", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11, background: "var(--bg)" }} />
+                  <span>→</span>
+                  <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)}
+                    style={{ padding: "4px 6px", border: "1px solid var(--border)", borderRadius: 6, fontSize: 11, background: "var(--bg)" }} />
+                </div>
+              )}
+            </div>
             <div className="table-scroll" style={{ padding: 0 }}>
               <table className="data-table">
                 <thead>
@@ -59,10 +105,10 @@ export default function ARPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {ar.length === 0 ? (
-                    <tr><td colSpan={7} className="empty">{data ? "No unpaid invoices" : "Loading..."}</td></tr>
+                  {visible.length === 0 ? (
+                    <tr><td colSpan={7} className="empty">{data ? "No invoices match" : "Loading..."}</td></tr>
                   ) : (
-                    [...ar].sort((a, b) => b.daysOverdue - a.daysOverdue).slice(0, 50).map((inv) => {
+                    [...visible].sort((a, b) => b.daysOverdue - a.daysOverdue).slice(0, 50).map((inv) => {
                       const critical = inv.daysOverdue > 30;
                       return (
                         <tr key={inv.id} style={critical ? { background: "var(--red-light)" } : undefined}>
@@ -79,8 +125,8 @@ export default function ARPage() {
                             </span>
                           </td>
                           <td>
-                            {inv.daysOverdue > 60 ? <span className="badge badge-red">Critical</span> :
-                             inv.daysOverdue > 30 ? <span className="badge badge-red">Critical</span> :
+                            {inv.daysOverdue > 60 ? <span className="badge badge-red">Critical 60+</span> :
+                             inv.daysOverdue > 30 ? <span className="badge badge-red">Overdue 30+</span> :
                              inv.daysOverdue > 15 ? <span className="badge badge-amber">Late</span> :
                              inv.daysOverdue > 0 ? <span className="badge badge-blue">Current</span> :
                              <span className="badge badge-green">New</span>}
