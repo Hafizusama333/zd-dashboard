@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { hcpFetchAll, hcpJobLineItems } from "@/lib/hcp";
+import { hcpFetchAll, hcpFetchSince, hcpJobLineItems } from "@/lib/hcp";
 import {
   buildMaterialJob,
   computeAging,
@@ -11,13 +11,18 @@ import {
   computeKPIs,
   computeRouteClusters,
   isLucasJob,
+  jobCompletedDate,
   normalizeCustomer,
   normalizeEstimate,
   normalizeInvoice,
   normalizeJob,
+  PERIOD_LABELS,
+  periodStart,
   summarizeMaterials,
 } from "@/lib/normalize";
-import type { DashboardData, MaterialJob } from "@/lib/types";
+import type { DashboardData, MaterialJob, Period } from "@/lib/types";
+
+const VALID_PERIODS: Period[] = ["wtd", "mtd", "qtd", "ytd"];
 
 export const dynamic = "force-dynamic";
 
@@ -32,13 +37,27 @@ async function safe<T>(label: string, fn: () => Promise<T>, fallback: T, errors:
   }
 }
 
-export async function GET() {
+export async function GET(req: Request) {
   const errors: Record<string, string> = {};
 
+  const url = new URL(req.url);
+  const periodParam = (url.searchParams.get("period") || "mtd").toLowerCase() as Period;
+  const period: Period = VALID_PERIODS.includes(periodParam) ? periodParam : "mtd";
+  const now = new Date();
+  const start = periodStart(period, now);
+  const startISO = start.toISOString();
+  // YTD/QTD can span many pages; bound by period so MTD/WTD stay fast.
+  const jobPageLimit = period === "ytd" ? 50 : period === "qtd" ? 25 : 6;
+
+  const estCreated = (e: AnyRec): string | null =>
+    (e.created_at as string) || (e.created as string) || null;
+
   const [jobsRaw, estimatesRaw, invoicesRaw, customersRaw] = await Promise.all([
-    safe("jobs", () => hcpFetchAll<AnyRec>("/jobs", "jobs", 100, 5), [], errors),
-    safe("estimates", () => hcpFetchAll<AnyRec>("/estimates", "estimates", 100, 5), [], errors),
-    safe("invoices", () => hcpFetchAll<AnyRec>("/invoices", "invoices", 100, 5), [], errors),
+    // Period KPIs count jobs by completed_at; page newest-first and stop once past the window.
+    safe("jobs", () => hcpFetchSince<AnyRec>("/jobs", "jobs", startISO, jobCompletedDate, 100, jobPageLimit), [], errors),
+    safe("estimates", () => hcpFetchSince<AnyRec>("/estimates", "estimates", startISO, estCreated, 100, jobPageLimit), [], errors),
+    // AR/aging is all-time outstanding, not period-scoped.
+    safe("invoices", () => hcpFetchAll<AnyRec>("/invoices", "invoices", 100, 10), [], errors),
     safe("customers", () => hcpFetchAll<AnyRec>("/customers", "customers", 100, 5), [], errors),
   ]);
 
@@ -69,7 +88,7 @@ export async function GET() {
 
   const aging = computeAging(ar);
   const agingTotal = aging.current + aging.days_1_30 + aging.days_31_60 + aging.days_61_90 + aging.days_90_plus;
-  const kpis = computeKPIs({ jobs, estimates, ar, agingTotal });
+  const kpis = computeKPIs({ jobs, estimates, ar, agingTotal, period, now });
   const fireItems = computeFireItems({ ar, jobs, estimates });
   const contractors = computeContractors(jobsRaw, jobs, estimatesRaw, estimates);
   const customerStats = computeCustomerStats(jobs, estimates);
@@ -116,7 +135,10 @@ export async function GET() {
     routeClusters,
     materialJobs,
     lucasMaterialSummary,
-    fetchedAt: new Date().toISOString(),
+    fetchedAt: now.toISOString(),
+    period,
+    periodLabel: PERIOD_LABELS[period],
+    periodStart: startISO,
     errors: Object.keys(errors).length ? errors : undefined,
   };
 

@@ -101,6 +101,49 @@ const guessService = (description: string): string => {
 
 const ZD_GENERIC_ID = "pro_ace920fd9c4344e78367974cf1e4b5d5";
 
+export type Period = "wtd" | "mtd" | "qtd" | "ytd";
+
+// Start (inclusive) of the to-date window for `period`, relative to `now`.
+// wtd = Sunday 00:00 of current week, mtd = 1st of month, qtd = 1st of quarter, ytd = Jan 1.
+export function periodStart(period: Period, now: Date = new Date()): Date {
+  const y = now.getFullYear();
+  switch (period) {
+    case "wtd": {
+      const d = new Date(y, now.getMonth(), now.getDate());
+      d.setDate(d.getDate() - d.getDay()); // back to Sunday
+      return d;
+    }
+    case "qtd": {
+      const q = Math.floor(now.getMonth() / 3) * 3;
+      return new Date(y, q, 1);
+    }
+    case "ytd":
+      return new Date(y, 0, 1);
+    case "mtd":
+    default:
+      return new Date(y, now.getMonth(), 1);
+  }
+}
+
+export const PERIOD_LABELS: Record<Period, string> = {
+  wtd: "Week to date",
+  mtd: "Month to date",
+  qtd: "Quarter to date",
+  ytd: "Year to date",
+};
+
+// The date HCP attributes a completed job to (revenue/job-count basis).
+// Jobs frequently have a null scheduled_start, so completed_at is the source of truth;
+// fall back to created_at only when completed_at is absent.
+export function jobCompletedDate(raw: AnyRec): string | null {
+  const wts = pick<AnyRec>(raw, "work_timestamps") || {};
+  return (
+    (pick(wts, "completed_at") as string) ||
+    (pick(raw, "created_at", "created") as string) ||
+    null
+  );
+}
+
 export function normalizeJob(raw: AnyRec): Job {
   const customer = pick<AnyRec>(raw, "customer") || {};
   const address = pick<AnyRec>(raw, "address", "service_address") || {};
@@ -138,6 +181,7 @@ export function normalizeJob(raw: AnyRec): Job {
       (pick(schedule, "scheduled_start", "arrival_window_start") as string) ||
       (pick(raw, "scheduled_start") as string) ||
       null,
+    completedAt: jobCompletedDate(raw),
     total: pick(raw, "total_amount", "total") !== undefined
       ? money(pick(raw, "total_amount", "total"))
       : null,
@@ -253,13 +297,24 @@ const OPEN_JOB = (st: string) =>
 const OPEN_EST = (st: string) =>
   ["pending", "sent", "needs_follow_up", "draft", "scheduled", "needs_scheduling", "in_progress"].includes(st);
 
+// True when completed job `j` was completed on/after `startMs` (its completed_at, falling back
+// to scheduled then created — completedAt is set in normalizeJob via jobCompletedDate).
+function completedSince(j: Job, startMs: number): boolean {
+  const iso = j.completedAt || j.scheduled || j.createdAt;
+  if (!iso) return false;
+  const t = new Date(iso).getTime();
+  return Number.isFinite(t) && t >= startMs;
+}
+
 export function computeKPIs(args: {
   jobs: Job[];
   estimates: Estimate[];
   ar: Invoice[];
   agingTotal: number;
+  period?: Period;
+  now?: Date;
 }): KPIs {
-  const { jobs, estimates, ar, agingTotal } = args;
+  const { jobs, estimates, ar, agingTotal, period = "mtd", now = new Date() } = args;
   const completed = jobs.filter((j) => COMPLETE(j.status));
   const cancelled = jobs.filter((j) => CANCELLED(j.status));
   const open = jobs.filter((j) => OPEN_JOB(j.status));
@@ -269,14 +324,16 @@ export function computeKPIs(args: {
   const closedEstimates = estimates.length - openEstimates.length;
   const conversion = closedEstimates > 0 ? (wonEstimates.length / closedEstimates) * 100 : 0;
 
-  const now = new Date();
+  // MTD figures (kept for back-compat) computed by completed_at, not scheduled_start —
+  // ~40% of completed jobs have a null scheduled_start, which previously dropped them.
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
-  const monthJobs = completed.filter((j) => {
-    if (!j.scheduled) return false;
-    const t = new Date(j.scheduled).getTime();
-    return t >= monthStart;
-  });
+  const monthJobs = completed.filter((j) => completedSince(j, monthStart));
   const monthlyRevenue = monthJobs.reduce((acc, j) => acc + (j.total || 0), 0);
+
+  // Selected period (wtd/mtd/qtd/ytd), same completed_at basis.
+  const pStart = periodStart(period, now).getTime();
+  const periodJobs = completed.filter((j) => completedSince(j, pStart));
+  const periodRevenue = periodJobs.reduce((acc, j) => acc + (j.total || 0), 0);
 
   const totalRevenue = completed.reduce((acc, j) => acc + (j.total || 0), 0);
   const collectionRate = totalRevenue + agingTotal > 0
@@ -303,9 +360,11 @@ export function computeKPIs(args: {
   return {
     total_revenue: totalRevenue,
     monthly_revenue: monthlyRevenue,
+    period_revenue: periodRevenue,
     open_jobs: open.length,
     jobs_in_progress: inProg.length,
     jobs_this_month: monthJobs.length,
+    jobs_this_period: periodJobs.length,
     completed_jobs: completed.length,
     cancelled_jobs: cancelled.length,
     ar_balance: ar.reduce((acc, i) => acc + i.total, 0),

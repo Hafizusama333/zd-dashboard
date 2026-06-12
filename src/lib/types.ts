@@ -7,6 +7,7 @@ export type Job = {
   tech: string;
   techId: string | null;
   scheduled: string | null;
+  completedAt: string | null;
   total: number | null;
   service: string;
   zip: string;
@@ -86,12 +87,16 @@ export type Aging = {
   days_90_plus: number;
 };
 
+export type Period = "wtd" | "mtd" | "qtd" | "ytd";
+
 export type KPIs = {
   total_revenue: number;
   monthly_revenue: number;
+  period_revenue: number;
   open_jobs: number;
   jobs_in_progress: number;
   jobs_this_month: number;
+  jobs_this_period: number;
   completed_jobs: number;
   cancelled_jobs: number;
   ar_balance: number;
@@ -184,5 +189,8 @@ export type DashboardData = {
     avgMarginPct: number;
   };
   fetchedAt: string;
+  period: Period;
+  periodLabel: string;
+  periodStart: string;
   errors?: Record<string, string>;
 };

@@ -5,9 +5,17 @@ import AgingRow from "@/components/AgingRow";
 import { useDashboard } from "@/components/DashboardProvider";
 import { fmtMoney } from "@/lib/format";
 
+const PERIOD_SHORT: Record<string, string> = {
+  wtd: "This week",
+  mtd: "This month",
+  qtd: "This quarter",
+  ytd: "This year",
+};
+
 export default function CommandCenter() {
   const { data } = useDashboard();
   const k = data?.kpis;
+  const periodShort = data ? PERIOD_SHORT[data.period] ?? "This period" : "This period";
   const cf = data?.cashFlow;
   const fire = data?.fireItems ?? [];
   const contractors = data?.contractors ?? [];
@@ -45,7 +53,11 @@ export default function CommandCenter() {
       </div>
 
       <div className="kpi-grid">
-        <KPI label="Monthly Revenue" value={fmtMoney(k?.monthly_revenue ?? 0)} meta="Current month" />
+        <KPI
+          label="Revenue"
+          value={fmtMoney(k?.period_revenue ?? 0)}
+          meta={data ? `${periodShort} · since ${new Date(data.periodStart).toLocaleDateString()}` : "—"}
+        />
         <KPI
           label="Collection Rate"
           value={collectionVsTarget != null ? `${collectionVsTarget}%` : "—"}
@@ -67,8 +79,8 @@ export default function CommandCenter() {
 
       <div className="kpi-grid section-gap">
         <KPI
-          label="Jobs This Month"
-          value={k ? String(k.jobs_this_month) : "—"}
+          label={`Jobs ${periodShort}`}
+          value={k ? String(k.jobs_this_period) : "—"}
           meta={`${k?.jobs_in_progress ?? 0} in progress`}
         />
         <KPI

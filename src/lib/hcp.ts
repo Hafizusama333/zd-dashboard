@@ -36,7 +36,34 @@ export async function hcpFetchAll<T = unknown>(
   arrayKey: string,
   pageSize = 100,
   pageLimit = 10,
+  extraParams?: Record<string, string | number | undefined>,
 ): Promise<T[]> {
+  const all: T[] = [];
+  for (let page = 1; page <= pageLimit; page++) {
+    const data = await hcpFetch<Record<string, unknown>>(path, {
+      params: { page, page_size: pageSize, ...extraParams },
+    });
+    const arr = (data[arrayKey] as T[] | undefined) || [];
+    all.push(...arr);
+    if (arr.length < pageSize) break;
+  }
+  return all;
+}
+
+// HCP returns jobs/estimates/invoices newest-first by created_at. For period KPIs we only
+// need records whose relevant date >= the window start. Page newest-first and stop once a
+// whole page falls entirely before `sinceISO` (minus a buffer, because completed_at can lag
+// created_at). `dateOf` extracts the record's relevant date. Always pulls at least one page.
+export async function hcpFetchSince<T = unknown>(
+  path: string,
+  arrayKey: string,
+  sinceISO: string,
+  dateOf: (rec: T) => string | null | undefined,
+  pageSize = 100,
+  pageLimit = 50,
+  bufferDays = 14,
+): Promise<T[]> {
+  const cutoff = new Date(sinceISO).getTime() - bufferDays * 86400000;
   const all: T[] = [];
   for (let page = 1; page <= pageLimit; page++) {
     const data = await hcpFetch<Record<string, unknown>>(path, {
@@ -45,6 +72,13 @@ export async function hcpFetchAll<T = unknown>(
     const arr = (data[arrayKey] as T[] | undefined) || [];
     all.push(...arr);
     if (arr.length < pageSize) break;
+    // Stop if every record on this page predates the cutoff (older pages only go further back).
+    const newest = arr.reduce((max, rec) => {
+      const d = dateOf(rec);
+      const t = d ? new Date(d).getTime() : NaN;
+      return Number.isFinite(t) && t > max ? t : max;
+    }, -Infinity);
+    if (Number.isFinite(newest) && newest < cutoff) break;
   }
   return all;
 }

@@ -63,6 +63,11 @@ body {
 .btn-primary:hover { background: var(--green-dark); border-color: var(--green-dark); color: white; }
 
 /* STATUS BAR */
+.period-filter { display: inline-flex; border: 1px solid var(--border); border-radius: var(--radius-sm); overflow: hidden; background: var(--surface); }
+.period-btn { padding: 6px 12px; font-size: 11px; font-weight: 600; color: var(--text-2); background: transparent; border: none; border-left: 1px solid var(--border); cursor: pointer; font-family: inherit; transition: all 0.15s; letter-spacing: 0.03em; }
+.period-btn:first-child { border-left: none; }
+.period-btn:hover { color: var(--text); background: var(--bg); }
+.period-btn.active { background: var(--green); color: white; }
 .status-bar { font-size: 11px; padding: 4px 12px; border-radius: 20px; border: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; }
 .status-dot.live { background: var(--green); animation: pulse 2s infinite; }

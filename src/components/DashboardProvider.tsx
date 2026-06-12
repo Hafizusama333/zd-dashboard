@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
-import type { DashboardData } from "@/lib/types";
+import type { DashboardData, Period } from "@/lib/types";
 
 type Status = "idle" | "loading" | "live" | "error";
 
@@ -12,6 +12,8 @@ type Ctx = {
   errorMsg: string | null;
   refresh: () => Promise<void>;
   lastSync: string | null;
+  period: Period;
+  setPeriod: (p: Period) => void;
 };
 
 const DashboardCtx = createContext<Ctx | null>(null);
@@ -22,13 +24,14 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
   const [statusText, setStatusText] = useState<string>("Idle");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [lastSync, setLastSync] = useState<string | null>(null);
+  const [period, setPeriod] = useState<Period>("mtd");
 
   const refresh = useCallback(async () => {
     setStatus("loading");
     setStatusText("Fetching data...");
     setErrorMsg(null);
     try {
-      const res = await fetch("/api/dashboard", { cache: "no-store" });
+      const res = await fetch(`/api/dashboard?period=${period}`, { cache: "no-store" });
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       const payload = (await res.json()) as DashboardData;
       setData(payload);
@@ -49,7 +52,7 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
       setStatusText("Connection failed");
       setErrorMsg(e instanceof Error ? e.message : "Unknown error");
     }
-  }, []);
+  }, [period]);
 
   useEffect(() => {
     void refresh();
@@ -57,7 +60,7 @@ export function DashboardProvider({ children }: { children: React.ReactNode }) {
 
   return (
     <DashboardCtx.Provider
-      value={{ data, status, statusText, errorMsg, refresh, lastSync }}
+      value={{ data, status, statusText, errorMsg, refresh, lastSync, period, setPeriod }}
     >
       {children}
     </DashboardCtx.Provider>
