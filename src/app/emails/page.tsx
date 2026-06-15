@@ -1,228 +1,436 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import ChatPanel from "@/components/ChatPanel";
 import { fmtDate } from "@/lib/format";
+import { useDashboard } from "@/components/DashboardProvider";
+import { periodStart, PERIOD_LABELS } from "@/lib/normalize";
 
 type LiveEmail = {
   uid: number;
+  id: string;
+  threadId: string;
   from: string;
   fromEmail: string;
+  to: string;
   subject: string;
+  snippet: string;
+  body: string;
   date: string | null;
   seen: boolean;
   ageHours: number;
+  sizeEstimate: number;
+  labels: string[];
 };
 
-type EmailRow = {
-  from: string;
-  subject: string;
-  date: string;
-  type: string;
-  typeClass: string;
-  match: string;
-  matchClass: string;
-  action: string;
-  actionClass?: string;
-  rowClass?: string;
-};
-
-const EMAILS: EmailRow[] = [
-  { from: "T. Hargrove", subject: "Roof quote — 5512 Larkhaven", date: "26h ago", type: "Missed Lead", typeClass: "badge-red", match: "No Match", matchClass: "badge-red", action: "Create WO →", actionClass: "danger", rowClass: "missed" },
-  { from: "M. Johnson", subject: "Re: Invoice #2284 — when can we...", date: "3h ago", type: "Needs Reply", typeClass: "badge-amber", match: "INV-2284", matchClass: "badge-green", action: "Draft reply →" },
-  { from: "D. Rivera", subject: "Following up on estimate — 2nd time", date: "1d ago", type: "2nd Follow-up", typeClass: "badge-amber", match: "EST-0492", matchClass: "badge-green", action: "Reply now →" },
-  { from: "C. Booker", subject: "Flooring job — very satisfied!", date: "5h ago", type: "Review Opp", typeClass: "badge-green", match: "WO-1829", matchClass: "badge-green", action: "Send review link →" },
-  { from: "HCP Notify", subject: "Payment received — WO-1829 $1,400", date: "1d ago", type: "Payment", typeClass: "badge-green", match: "INV-2301 ✓", matchClass: "badge-green", action: "No action" },
-];
-
-const VALIDATION = [
-  { email: "Booker · flooring job", worker: "Dwayne", tag: "Tag: DWAYNE", status: "Match", statusClass: "badge-green" },
-  { email: "Rivera · roof repair", worker: "Lucas", tag: "Tag: LUCAS", status: "Match", statusClass: "badge-green" },
-  { email: "Hargrove · roof quote", worker: "—", tag: "No WO created", status: "Missing", statusClass: "badge-red" },
-];
-
-// Demo dates are relative strings ("26h ago", "1d ago"); parse to hours for sorting.
-const ageHours = (d: string): number => {
-  const m = d.match(/(\d+)\s*([hd])/);
-  if (!m) return 0;
-  const n = parseInt(m[1], 10);
-  return m[2] === "d" ? n * 24 : n;
-};
+const PAGE_SIZE = 25;
 
 const fmtAge = (hours: number): string =>
   hours <= 0 ? "—" : hours >= 48 ? `${Math.floor(hours / 24)}d` : `${Math.round(hours)}h`;
 
-export default function EmailsPage() {
-  // Oldest (longest unanswered) first so priority is at the top.
-  const sortedEmails = [...EMAILS].sort((a, b) => ageHours(b.date) - ageHours(a.date));
+// Color a label badge by its meaning. Gmail system labels vary; map a few
+// common ones, everything else falls back to gray.
+function labelClass(name: string): string {
+  const n = name.toLowerCase();
+  if (n === "unread") return "badge-amber";
+  if (n.includes("work order")) return "badge-blue";
+  if (n.includes("important") || n.includes("starred")) return "badge-red";
+  if (n.startsWith("category_") || n === "inbox") return "badge-gray";
+  return "badge-gray";
+}
 
-  const [live, setLive] = useState<LiveEmail[] | null>(null);
-  const [liveState, setLiveState] = useState<"loading" | "live" | "stub" | "error">("loading");
-  const [liveMsg, setLiveMsg] = useState<string>("");
+export default function EmailsPage() {
+  const [emails, setEmails] = useState<LiveEmail[]>([]);
+  const [state, setState] = useState<"loading" | "live" | "error">("loading");
+  const [msg, setMsg] = useState<string>("");
+  const [search, setSearch] = useState("");
+  const [page, setPage] = useState(1);
+  const [selected, setSelected] = useState<LiveEmail | null>(null);
+  const { period } = useDashboard();
 
   useEffect(() => {
     let cancelled = false;
     (async () => {
       try {
         const res = await fetch("/api/emails", { cache: "no-store" });
-        const json = (await res.json()) as { stub?: boolean; reason?: string; error?: string; emails?: LiveEmail[] };
+        const json = (await res.json()) as { error?: string; emails?: LiveEmail[] };
         if (cancelled) return;
-        if (json.error) { setLiveState("error"); setLiveMsg(json.error); return; }
-        if (json.stub) { setLiveState("stub"); setLiveMsg(json.reason || "Gmail not configured."); return; }
-        setLive(json.emails || []);
-        setLiveState("live");
+        if (json.error) {
+          setState("error");
+          setMsg(json.error);
+          return;
+        }
+        setEmails(json.emails || []);
+        setState("live");
       } catch (e) {
-        if (!cancelled) { setLiveState("error"); setLiveMsg(e instanceof Error ? e.message : "fetch failed"); }
+        if (!cancelled) {
+          setState("error");
+          setMsg(e instanceof Error ? e.message : "fetch failed");
+        }
       }
     })();
-    return () => { cancelled = true; };
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
-  const useLive = liveState === "live" && live;
+  // Filter by the global time period (WTD/MTD/QTD/YTD from the Topbar). Emails
+  // with no parseable date are dropped from period-scoped views.
+  const periodEmails = useMemo(() => {
+    const start = periodStart(period).getTime();
+    return emails.filter((e) => e.date !== null && new Date(e.date).getTime() >= start);
+  }, [emails, period]);
+
+  const kpis = useMemo(() => {
+    let unread = 0;
+    let stale = 0; // unread ≥ 24h
+    const senders = new Set<string>();
+    for (const e of periodEmails) {
+      if (!e.seen) unread++;
+      if (!e.seen && e.ageHours >= 24) stale++;
+      if (e.fromEmail) senders.add(e.fromEmail.toLowerCase());
+    }
+    return { total: periodEmails.length, unread, stale, senders: senders.size };
+  }, [periodEmails]);
+
+  // Oldest first so the longest-waiting mail surfaces at the top.
+  const sorted = useMemo(
+    () => [...periodEmails].sort((a, b) => b.ageHours - a.ageHours),
+    [periodEmails]
+  );
+
+  const filtered = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return sorted;
+    return sorted.filter((e) =>
+      [e.from, e.fromEmail, e.to, e.subject, e.labels.join(" ")]
+        .join(" ")
+        .toLowerCase()
+        .includes(q)
+    );
+  }, [sorted, search]);
+
+  // Reset to first page when the search or period changes — during render, not
+  // in an effect, to avoid a cascading re-render.
+  const [prevKey, setPrevKey] = useState(search + "|" + period);
+  if (search + "|" + period !== prevKey) {
+    setPrevKey(search + "|" + period);
+    setPage(1);
+  }
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const safePage = Math.min(page, totalPages);
+  const pageRows = useMemo(
+    () => filtered.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE),
+    [filtered, safePage]
+  );
 
   return (
     <div className="page">
-      {!useLive && (
+      {state !== "live" && (
         <div className="demo-banner">
-          {liveState === "loading"
+          {state === "loading"
             ? "Connecting to Gmail inbox…"
-            : liveState === "error"
-            ? `⚠ Email fetch error: ${liveMsg}`
-            : `⚠ Demo data — ${liveMsg}`}
+            : `⚠ Email fetch error: ${msg}`}
         </div>
       )}
-      {useLive && (
-        <div className="card section-gap">
-          <div className="card-header">
-            <span className="card-title">Live Inbox — Inbound (oldest first)</span>
-            <span style={{ fontSize: 11, color: "var(--text-2)" }}>{live!.length} emails · Gmail IMAP</span>
-          </div>
-          <div className="table-scroll" style={{ padding: 0 }}>
-            <table className="data-table">
-              <thead>
-                <tr><th></th><th>From</th><th>Subject</th><th>Received</th><th>Waiting</th><th>Status</th></tr>
-              </thead>
-              <tbody>
-                {live!.length === 0 ? (
-                  <tr><td colSpan={6} className="empty">Inbox empty</td></tr>
-                ) : (
-                  live!.map((e) => {
-                    const stale = !e.seen && e.ageHours >= 24;
-                    return (
-                      <tr key={e.uid} style={stale ? { background: "var(--red-light)" } : undefined}>
-                        <td><div className="dot" style={{ background: e.seen ? "var(--text-3)" : "var(--blue)" }} /></td>
-                        <td><b>{e.from}</b><div style={{ fontSize: 11, color: "var(--text-2)" }}>{e.fromEmail}</div></td>
-                        <td>{e.subject}</td>
-                        <td className="mono" style={{ color: "var(--text-2)" }}>{fmtDate(e.date)}</td>
-                        <td className="mono" style={{ color: stale ? "var(--red)" : "inherit", fontWeight: stale ? 600 : 400 }}>
-                          {fmtAge(e.ageHours)}{stale ? " ⚠" : ""}
-                        </td>
-                        <td>
-                          {e.seen
-                            ? <span className="badge badge-gray">Read</span>
-                            : <span className="badge badge-amber">Unread</span>}
-                        </td>
-                      </tr>
-                    );
-                  })
-                )}
-              </tbody>
-            </table>
-          </div>
+
+      {state === "live" && (
+        <div className="kpi-grid section-gap">
+          <KPI label="Total Emails" value={String(kpis.total)} meta={`${kpis.senders} senders`} />
+          <KPI label="Unread" value={String(kpis.unread)} valueClass="warn" meta="Awaiting triage" />
+          <KPI
+            label="Stale (≥24h)"
+            value={String(kpis.stale)}
+            valueClass={kpis.stale > 0 ? "down" : "up"}
+            meta="Unread & aging"
+          />
+          <KPI label="Inbox" value={String(kpis.total)} meta="Latest 250 messages" />
         </div>
       )}
+
       <div className="grid-chat">
         <div>
-          {!useLive && (
           <div className="card section-gap">
             <div className="card-header">
-              <span className="card-title">Email Audit — All Inbound (demo)</span>
-              <button className="action-btn primary">Run Full Audit</button>
+              <span className="card-title">Email Audit — Inbound · {PERIOD_LABELS[period]} (oldest first)</span>
+              <input
+                type="search"
+                placeholder="Search sender, subject, label…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                style={{
+                  padding: "6px 10px",
+                  fontSize: 12,
+                  border: "1px solid var(--border)",
+                  borderRadius: 6,
+                  fontFamily: "inherit",
+                  minWidth: 240,
+                }}
+              />
             </div>
-            <div style={{ padding: 0 }}>
-              <div style={{ background: "var(--red-light)", padding: "10px 16px", display: "flex", alignItems: "center", gap: 10, borderBottom: "1px solid #fca5a5" }}>
-                <div className="dot" style={{ background: "var(--red)" }} />
-                <div style={{ flex: 1 }}>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: "var(--red)" }}>
-                    CRITICAL — MISSED LEAD · 26 hours unanswered
-                  </div>
-                  <div style={{ fontSize: 11, color: "var(--red)", opacity: 0.8 }}>
-                    T. Hargrove · Roof quote request — 5512 Larkhaven Dr · No HCP match found
-                  </div>
+            <div className="table-scroll" style={{ padding: 0 }}>
+              {state === "loading" ? (
+                <div style={{ padding: 24, color: "var(--text-2)" }}>Loading inbox…</div>
+              ) : state === "error" ? (
+                <div style={{ padding: 24, color: "var(--red)" }}>Could not load emails: {msg}</div>
+              ) : filtered.length === 0 ? (
+                <div style={{ padding: 24, color: "var(--text-2)" }}>
+                  {emails.length === 0
+                    ? "Inbox empty."
+                    : search.trim()
+                      ? "No matches for your search."
+                      : `No emails in ${PERIOD_LABELS[period]}.`}
                 </div>
-                <button className="action-btn primary" style={{ background: "var(--red)", borderColor: "var(--red)" }}>
-                  Create Work Order →
-                </button>
+              ) : (
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th></th>
+                      <th>From</th>
+                      <th>Subject</th>
+                      <th>Labels</th>
+                      <th>Received</th>
+                      <th>Waiting</th>
+                      <th>Status</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {pageRows.map((e) => {
+                      const stale = !e.seen && e.ageHours >= 24;
+                      return (
+                        <tr
+                          key={e.uid}
+                          onClick={() => setSelected(e)}
+                          style={{ cursor: "pointer", ...(stale ? { background: "var(--red-light)" } : {}) }}
+                        >
+                          <td>
+                            <div className="dot" style={{ background: e.seen ? "var(--text-3)" : "var(--blue)" }} />
+                          </td>
+                          <td style={{ maxWidth: 220 }}>
+                            <b style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {e.from || "—"}
+                            </b>
+                            {e.fromEmail && (
+                              <div
+                                title={e.fromEmail}
+                                style={{
+                                  fontSize: 11,
+                                  color: "var(--text-2)",
+                                  overflow: "hidden",
+                                  textOverflow: "ellipsis",
+                                  whiteSpace: "nowrap",
+                                }}
+                              >
+                                {e.fromEmail}
+                              </div>
+                            )}
+                          </td>
+                          <td
+                            title={e.subject}
+                            style={{
+                              maxWidth: 380,
+                              overflow: "hidden",
+                              textOverflow: "ellipsis",
+                              whiteSpace: "nowrap",
+                            }}
+                          >
+                            {e.subject || "—"}
+                          </td>
+                          <td>
+                            <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                              {e.labels.slice(0, 3).map((l) => (
+                                <span key={l} className={`badge ${labelClass(l)}`} style={{ fontSize: 10 }}>
+                                  {l}
+                                </span>
+                              ))}
+                              {e.labels.length > 3 && (
+                                <span style={{ fontSize: 10, color: "var(--text-3)" }}>+{e.labels.length - 3}</span>
+                              )}
+                            </div>
+                          </td>
+                          <td className="mono" style={{ color: "var(--text-2)" }}>{fmtDate(e.date)}</td>
+                          <td
+                            className="mono"
+                            style={{ color: stale ? "var(--red)" : "inherit", fontWeight: stale ? 600 : 400 }}
+                          >
+                            {fmtAge(e.ageHours)}{stale ? " ⚠" : ""}
+                          </td>
+                          <td>
+                            {e.seen ? (
+                              <span className="badge badge-gray">Read</span>
+                            ) : (
+                              <span className="badge badge-amber">Unread</span>
+                            )}
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+            {state === "live" && filtered.length > 0 && (
+              <div
+                className="card-body"
+                style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12 }}
+              >
+                <span style={{ fontSize: 12, color: "var(--text-2)" }}>
+                  {(safePage - 1) * PAGE_SIZE + 1}–{Math.min(safePage * PAGE_SIZE, filtered.length)} of {filtered.length}
+                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <button className="action-btn" disabled={safePage <= 1} onClick={() => setPage((p) => Math.max(1, p - 1))}>
+                    ← Prev
+                  </button>
+                  <span style={{ fontSize: 12, color: "var(--text-2)" }}>
+                    Page {safePage} / {totalPages}
+                  </span>
+                  <button
+                    className="action-btn"
+                    disabled={safePage >= totalPages}
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  >
+                    Next →
+                  </button>
+                </div>
               </div>
-              <table className="data-table">
-                <thead>
-                  <tr>
-                    <th></th><th>From</th><th>Subject</th><th>Date</th><th>Type</th><th>HCP Match</th><th>Action</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {sortedEmails.map((e, i) => (
-                    <tr key={i} style={e.rowClass ? { background: "var(--red-light)" } : undefined}>
-                      <td><div className="dot" style={{ background: "var(--blue)" }} /></td>
-                      <td><b>{e.from}</b></td>
-                      <td>{e.subject}</td>
-                      <td className="mono">{e.date}</td>
-                      <td><span className={`badge ${e.typeClass}`}>{e.type}</span></td>
-                      <td><span className={`badge ${e.matchClass}`}>{e.match}</span></td>
-                      <td>
-                        {e.action === "No action" ? (
-                          <span style={{ fontSize: 11, color: "var(--text-3)" }}>No action</span>
-                        ) : (
-                          <button className={`action-btn ${e.actionClass || ""}`}>{e.action}</button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
+            )}
           </div>
-          )}
-
-          {!useLive && (
-          <div className="card">
-            <div className="card-header">
-              <span className="card-title">Worker-to-Email Content Validation</span>
-              <span className="card-action">View all →</span>
-            </div>
-            <div className="card-body">
-              <p style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 12 }}>
-                Cross-referencing contractors mentioned in emails against HCP tags. Flags mismatches.
-              </p>
-              <table className="data-table">
-                <thead>
-                  <tr><th>Email</th><th>Worker Mentioned</th><th>HCP Tag Match</th><th>Status</th></tr>
-                </thead>
-                <tbody>
-                  {VALIDATION.map((v, i) => (
-                    <tr key={i}>
-                      <td>{v.email}</td>
-                      <td>{v.worker}</td>
-                      <td>{v.tag}</td>
-                      <td><span className={`badge ${v.statusClass}`}>{v.status}</span></td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          )}
         </div>
 
         <ChatPanel
           context="emails"
           quickPrompts={[
-            "Create HCP work order for Hargrove at 5512 Larkhaven",
-            "Draft follow-up reply to Rivera on EST-0492",
-            "List all emails with no HCP match this week",
+            "Which emails are unread and over 24h old?",
+            "Summarize emails labeled NEW WORK ORDERS",
+            "List all senders with unread messages",
           ]}
         />
       </div>
+
+      {selected && <EmailDrawer email={selected} onClose={() => setSelected(null)} />}
+    </div>
+  );
+}
+
+function fmtSize(bytes: number): string {
+  if (!bytes) return "—";
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function EmailDrawer({ email, onClose }: { email: LiveEmail; onClose: () => void }) {
+  // Close on Escape.
+  useEffect(() => {
+    const onKey = (ev: KeyboardEvent) => ev.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      onClick={onClose}
+      style={{
+        position: "fixed",
+        inset: 0,
+        background: "rgba(0,0,0,0.35)",
+        zIndex: 100,
+        display: "flex",
+        justifyContent: "flex-end",
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: "min(560px, 100%)",
+          height: "100%",
+          background: "white",
+          boxShadow: "-4px 0 24px rgba(0,0,0,0.15)",
+          display: "flex",
+          flexDirection: "column",
+          overflow: "hidden",
+        }}
+      >
+        <div
+          style={{
+            padding: "16px 20px",
+            borderBottom: "1px solid var(--border)",
+            display: "flex",
+            alignItems: "flex-start",
+            gap: 12,
+          }}
+        >
+          <div style={{ flex: 1 }}>
+            <div style={{ fontSize: 16, fontWeight: 600, lineHeight: 1.35 }}>{email.subject || "(no subject)"}</div>
+            <div style={{ fontSize: 12, color: "var(--text-2)", marginTop: 6 }}>
+              {fmtDate(email.date)} · {fmtSize(email.sizeEstimate)}
+            </div>
+          </div>
+          <button className="action-btn" onClick={onClose} style={{ flexShrink: 0 }}>
+            ✕
+          </button>
+        </div>
+
+        <div style={{ padding: "16px 20px", borderBottom: "1px solid var(--border)" }}>
+          <Field label="From">
+            <b>{email.from || "—"}</b>
+            {email.fromEmail && (
+              <span style={{ color: "var(--text-2)", fontSize: 12 }}> &lt;{email.fromEmail}&gt;</span>
+            )}
+          </Field>
+          <Field label="To">{email.to || "—"}</Field>
+          <Field label="Status">
+            <span className={`badge ${email.seen ? "badge-gray" : "badge-amber"}`}>
+              {email.seen ? "Read" : "Unread"}
+            </span>
+          </Field>
+          {email.labels.length > 0 && (
+            <Field label="Tags">
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                {email.labels.map((l) => (
+                  <span key={l} className={`badge ${labelClass(l)}`} style={{ fontSize: 10 }}>
+                    {l}
+                  </span>
+                ))}
+              </div>
+            </Field>
+          )}
+        </div>
+
+        <div style={{ padding: "16px 20px", overflowY: "auto", flex: 1 }}>
+          <div style={{ fontSize: 11, fontWeight: 600, color: "var(--text-2)", textTransform: "uppercase", letterSpacing: "0.04em", marginBottom: 8 }}>
+            Body
+          </div>
+          <div style={{ fontSize: 13, lineHeight: 1.6, whiteSpace: "pre-wrap", wordBreak: "break-word", color: "var(--text)" }}>
+            {email.body || email.snippet || "No body content available."}
+          </div>
+          {email.body && email.body !== email.snippet && (
+            <div style={{ marginTop: 16, fontSize: 11, color: "var(--text-3)" }}>
+              Message ID: {email.id} · Thread: {email.threadId}
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div style={{ display: "flex", gap: 12, marginBottom: 10, fontSize: 13 }}>
+      <div style={{ width: 56, flexShrink: 0, color: "var(--text-2)", fontWeight: 600 }}>{label}</div>
+      <div style={{ flex: 1, wordBreak: "break-word" }}>{children}</div>
+    </div>
+  );
+}
+
+function KPI({ label, value, meta, valueClass = "" }: { label: string; value: string; meta: string; valueClass?: string }) {
+  return (
+    <div className="kpi-card">
+      <div className="kpi-label">{label}</div>
+      <div className={`kpi-value ${valueClass}`}>{value}</div>
+      <div className="kpi-meta" style={{ color: "var(--text-2)" }}>{meta}</div>
     </div>
   );
 }
