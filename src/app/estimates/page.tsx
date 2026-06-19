@@ -1,6 +1,7 @@
 "use client";
 
 import ChatPanel from "@/components/ChatPanel";
+import DataSourceTooltip from "@/components/DataSourceTooltip";
 import { useDashboard } from "@/components/DashboardProvider";
 import { fmtMoney } from "@/lib/format";
 import type { Estimate, ServiceBaseline } from "@/lib/types";
@@ -40,7 +41,19 @@ export default function EstimatesPage() {
     <div className="page">
       <div className="grid-chat">
         <div>
-          <div className="kpi-grid section-gap">
+          <div className="section-head section-gap">
+            <span className="section-head-label">Estimate Metrics</span>
+            <DataSourceTooltip
+              source="HousecallPro /estimates via /api/dashboard"
+              filters={[
+                "Estimates created in range (paged newest-first by created_at)",
+                "Bucketed: unscheduled (not attended) vs completed (need invoice)",
+                "Conversion: created-in-range estimates that became jobs",
+              ]}
+              time="range"
+            />
+          </div>
+          <div className="kpi-grid">
             <KPI
               label="Unscheduled Estimates"
               value={String(unscheduled.length)}
@@ -58,7 +71,7 @@ export default function EstimatesPage() {
             <KPI label="Pipeline Value" value={fmtMoney(k?.pipeline_value ?? 0)} meta={`${k?.open_estimates ?? 0} open`} />
             <KPI
               label="Conversion Rate"
-              value={k ? `${Math.round(k.conversion_rate)}%` : "—"}
+              value={k ? `${k.conversion_rate.toFixed(2)}%` : "—"}
               metaClass="warn"
               meta="Estimate → job"
             />
@@ -66,7 +79,18 @@ export default function EstimatesPage() {
 
           <div className="card section-gap">
             <div className="card-header">
-              <span className="card-title">Unscheduled Estimates — Not Yet Attended</span>
+              <span className="card-title">
+                Unscheduled Estimates — Not Yet Attended
+                <DataSourceTooltip
+                  source="HousecallPro /estimates via /api/dashboard"
+                  filters={[
+                    "bucket = unscheduled (not yet attended)",
+                    "Sorted by hours waiting (desc), first 30",
+                    "AI price check vs service baselines",
+                  ]}
+                  time="range"
+                />
+              </span>
               <span className="badge badge-red">Oldest first</span>
             </div>
             <div className="table-scroll" style={{ padding: 0 }}>
@@ -104,7 +128,17 @@ export default function EstimatesPage() {
 
           <div className="card section-gap">
             <div className="card-header">
-              <span className="card-title">Completed Estimates — Awaiting Invoice</span>
+              <span className="card-title">
+                Completed Estimates — Awaiting Invoice
+                <DataSourceTooltip
+                  source="HousecallPro /estimates via /api/dashboard"
+                  filters={[
+                    "bucket = completed (visited, not yet invoiced)",
+                    "Sorted by hours waiting (desc), first 30",
+                  ]}
+                  time="range"
+                />
+              </span>
               <span style={{ fontSize: 11, color: "var(--text-2)" }}>Visited · ready to invoice</span>
             </div>
             <div className="table-scroll" style={{ padding: 0 }}>
@@ -141,7 +175,17 @@ export default function EstimatesPage() {
 
           <div className="card">
             <div className="card-header">
-              <span className="card-title">Service Baselines (from completed jobs)</span>
+              <span className="card-title">
+                Service Baselines (from completed jobs)
+                <DataSourceTooltip
+                  source="HousecallPro /jobs via /api/dashboard"
+                  filters={[
+                    "Completed jobs in range, grouped by service",
+                    "avg / min / max of job totals per service",
+                  ]}
+                  time="range"
+                />
+              </span>
               <span style={{ fontSize: 11, color: "var(--text-2)" }}>Used by AI price check</span>
             </div>
             <div style={{ padding: 0 }}>

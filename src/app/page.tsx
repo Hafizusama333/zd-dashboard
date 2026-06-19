@@ -2,20 +2,14 @@
 
 import Link from "next/link";
 import AgingRow from "@/components/AgingRow";
+import DataSourceTooltip from "@/components/DataSourceTooltip";
 import { useDashboard } from "@/components/DashboardProvider";
 import { fmtMoney } from "@/lib/format";
-
-const PERIOD_SHORT: Record<string, string> = {
-  wtd: "This week",
-  mtd: "This month",
-  qtd: "This quarter",
-  ytd: "This year",
-};
 
 export default function CommandCenter() {
   const { data } = useDashboard();
   const k = data?.kpis;
-  const periodShort = data ? PERIOD_SHORT[data.period] ?? "This period" : "This period";
+  const periodShort = data ? data.periodLabel : "Selected range";
   const cf = data?.cashFlow;
   const fire = data?.fireItems ?? [];
   const contractors = data?.contractors ?? [];
@@ -52,11 +46,24 @@ export default function CommandCenter() {
         </div>
       </div>
 
+      <div className="section-head">
+        <span className="section-head-label">Key Metrics</span>
+        <DataSourceTooltip
+          source="HousecallPro — /jobs, /estimates, /invoices via /api/dashboard"
+          filters={[
+            "Revenue: jobs scheduled in range + work_status=completed (subtotal sum)",
+            "Gross margin: line items of that revenue set, (rev−cost)/rev on non-tax lines",
+            "Pipeline: open estimates",
+            "Collection rate: collected ÷ (collected + AR)",
+          ]}
+          time="range"
+        />
+      </div>
       <div className="kpi-grid">
         <KPI
           label="Revenue"
           value={fmtMoney(k?.period_revenue ?? 0)}
-          meta={data ? `${periodShort} · since ${new Date(data.periodStart).toLocaleDateString()}` : "—"}
+          meta={data ? periodShort : "—"}
         />
         <KPI
           label="Collection Rate"
@@ -71,21 +78,34 @@ export default function CommandCenter() {
         />
         <KPI
           label="Gross Profit Margin"
-          value={k ? `${Math.round(k.gross_margin_pct)}%` : "—"}
+          value={k ? `${k.gross_margin_pct.toFixed(2)}%` : "—"}
           metaClass="up"
-          meta="Healthy · target 40%"
+          meta="Labor revenue minus cost"
         />
       </div>
 
-      <div className="kpi-grid section-gap">
+      <div className="section-head section-gap">
+        <span className="section-head-label">Operations</span>
+        <DataSourceTooltip
+          source="HousecallPro — /jobs, /estimates via /api/dashboard"
+          filters={[
+            "Job Count: jobs created in range, non-canceled (HCP Job-count report)",
+            "Estimate Conversion: estimates created in range that became jobs",
+            "Outstanding AR: open (unpaid) invoices, all-time",
+            "Total Revenue: all completed jobs (all-time)",
+          ]}
+          time="range"
+        />
+      </div>
+      <div className="kpi-grid">
         <KPI
-          label={`Jobs ${periodShort}`}
-          value={k ? String(k.jobs_this_period) : "—"}
+          label="Job Count"
+          value={k ? String(k.jobs_created_count) : "—"}
           meta={`${k?.jobs_in_progress ?? 0} in progress`}
         />
         <KPI
           label="Estimate Conversion"
-          value={k ? `${Math.round(k.conversion_rate)}%` : "—"}
+          value={k ? `${k.conversion_rate.toFixed(2)}%` : "—"}
           metaClass="warn"
           meta="Target 70%"
         />
@@ -104,7 +124,21 @@ export default function CommandCenter() {
         />
       </div>
 
-      <div className="cf-bar section-gap">
+      <div className="section-head section-gap">
+        <span className="section-head-label">Cash Flow</span>
+        <DataSourceTooltip
+          source="Derived from /api/dashboard KPIs + AR"
+          filters={[
+            "Collected: period revenue × collection rate",
+            "AR Outstanding: open invoices (all-time)",
+            "AP Due: contractor AP (demo)",
+            "Pipeline (30d): open estimates next 30 days",
+            "Net Position: collected + pipeline − AR − AP",
+          ]}
+          time="range"
+        />
+      </div>
+      <div className="cf-bar">
         <CFSeg label="Collected" value={fmtMoney(cf?.collected ?? 0)} valueClass="up" />
         <CFSeg label="AR Outstanding" value={fmtMoney(cf?.ar_outstanding ?? 0)} valueClass="down" />
         <CFSeg label="AP Due" value={fmtMoney(cf?.ap_due ?? 0)} valueClass="down" />
@@ -115,7 +149,19 @@ export default function CommandCenter() {
       <div className="grid-2 section-gap">
         <div className="card">
           <div className="card-header">
-            <span className="card-title">Action Queue</span>
+            <span className="card-title">
+              Action Queue
+              <DataSourceTooltip
+                source="/api/dashboard — jobs, estimates, open invoices"
+                filters={[
+                  "Worst open invoice overdue ≥ 30d",
+                  "Job scheduled/in-progress with no contractor",
+                  "Estimate pending ≥ 7d no response",
+                  "≥ 3 completed jobs with no review",
+                ]}
+                time="range"
+              />
+            </span>
             <Link className="card-action" href="/ar">View all →</Link>
           </div>
           <div style={{ padding: 0 }}>
@@ -143,7 +189,17 @@ export default function CommandCenter() {
 
         <div className="card">
           <div className="card-header">
-            <span className="card-title">Contractor Leaderboard</span>
+            <span className="card-title">
+              Contractor Leaderboard
+              <DataSourceTooltip
+                source="HousecallPro /jobs via /api/dashboard"
+                filters={[
+                  "Jobs scheduled in range, grouped by assigned contractor",
+                  "Ranked by revenue; completion = completed ÷ assigned",
+                ]}
+                time="range"
+              />
+            </span>
             <Link className="card-action" href="/contractors">Full report →</Link>
           </div>
           <div style={{ padding: 0 }}>
@@ -184,7 +240,17 @@ export default function CommandCenter() {
 
       <div className="card section-gap">
         <div className="card-header">
-          <span className="card-title">AR Aging Summary</span>
+          <span className="card-title">
+            AR Aging Summary
+            <DataSourceTooltip
+              source="HousecallPro /invoices via /api/dashboard"
+              filters={[
+                "status=open (unpaid) invoices, server-side filtered",
+                "Bucketed by days past due date",
+              ]}
+              time="all-time"
+            />
+          </span>
           <Link className="card-action" href="/ar">Full AR →</Link>
         </div>
         <div className="card-body">

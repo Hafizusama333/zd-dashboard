@@ -68,6 +68,10 @@ body {
 .period-btn:first-child { border-left: none; }
 .period-btn:hover { color: var(--text); background: var(--bg); }
 .period-btn.active { background: var(--green); color: white; }
+.date-range-filter { display: inline-flex; align-items: center; gap: 6px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); padding: 3px 8px; }
+.date-input { font-size: 11px; font-weight: 600; color: var(--text); background: transparent; border: none; font-family: inherit; cursor: pointer; padding: 3px 4px; }
+.date-input:focus { outline: none; color: var(--green); }
+.date-range-sep { font-size: 11px; color: var(--text-2); }
 .status-bar { font-size: 11px; padding: 4px 12px; border-radius: 20px; border: 1px solid var(--border); display: flex; align-items: center; gap: 6px; }
 .status-dot { width: 7px; height: 7px; border-radius: 50%; }
 .status-dot.live { background: var(--green); animation: pulse 2s infinite; }
@@ -80,6 +84,9 @@ body {
 /* LOADING OVERLAY */
 .loading-overlay { position: fixed; top: 56px; left: 220px; right: 0; bottom: 0; background: rgba(247,248,250,0.85); display: flex; flex-direction: column; align-items: center; justify-content: center; z-index: 200; gap: 12px; }
 .loading-spinner { width: 36px; height: 36px; border: 3px solid var(--border); border-top-color: var(--green); border-radius: 50%; animation: spin 0.8s linear infinite; }
+.cell-spinner { display: inline-block; width: 12px; height: 12px; border: 2px solid var(--border); border-top-color: var(--green); border-radius: 50%; animation: spin 0.7s linear infinite; vertical-align: middle; flex-shrink: 0; }
+.cell-loading { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-2); }
+.ap-cost-banner { display: flex; align-items: center; gap: 8px; padding: 8px 16px; font-size: 12px; color: var(--text-2); background: var(--bg); border-bottom: 1px solid var(--border); }
 .loading-text { font-size: 13px; color: var(--text-2); }
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.5; } }
@@ -207,3 +214,33 @@ body {
 .table-scroll { overflow-x: auto; }
 .empty { padding: 32px; text-align: center; color: var(--text-3); font-size: 13px; }
 .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+
+/* Section heading with provenance tooltip (sits above bare KPI/cf grids) */
+.section-head { display: flex; align-items: center; margin-bottom: 8px; }
+.section-head-label { font-size: 11px; font-weight: 600; color: var(--text-2); text-transform: uppercase; letter-spacing: 0.05em; }
+
+/* Data-source provenance tooltip */
+.ds-tip { position: relative; display: inline-flex; align-items: center; color: var(--text-3); cursor: help; margin-left: 6px; vertical-align: middle; outline: none; }
+.ds-tip:hover, .ds-tip:focus-visible { color: var(--text-2); }
+.ds-tip-pop {
+  position: absolute; top: calc(100% + 8px); left: 0; z-index: 60;
+  width: max-content; max-width: 320px;
+  background: var(--surface); border: 1px solid var(--border); border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0,0,0,0.12); padding: 10px 12px;
+  display: none; flex-direction: column; gap: 7px;
+  font-size: 11px; line-height: 1.4; color: var(--text); text-align: left;
+  cursor: default; white-space: normal;
+}
+.ds-tip:hover .ds-tip-pop, .ds-tip:focus-within .ds-tip-pop, .ds-tip:focus-visible .ds-tip-pop { display: flex; }
+.ds-tip-pop::before {
+  content: ""; position: absolute; bottom: 100%; left: 9px;
+  border: 6px solid transparent; border-bottom-color: var(--border);
+}
+.ds-tip-row { display: flex; gap: 8px; align-items: flex-start; }
+.ds-tip-key { flex-shrink: 0; width: 48px; font-weight: 600; color: var(--text-2); text-transform: uppercase; font-size: 9px; letter-spacing: 0.04em; padding-top: 1px; }
+.ds-tip-val { flex: 1; display: flex; flex-direction: column; gap: 3px; font-family: "DM Mono", monospace; word-break: break-word; }
+.ds-tip-filter { display: block; }
+.ds-tip-filter::before { content: "• "; color: var(--text-3); }
+/* When the icon sits near the right edge, flip the popover so it stays on-screen */
+.ds-tip.ds-tip-right .ds-tip-pop { left: auto; right: 0; }
+.ds-tip.ds-tip-right .ds-tip-pop::before { left: auto; right: 9px; }

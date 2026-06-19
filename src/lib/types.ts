@@ -13,6 +13,8 @@ export type Job = {
   zip: string;
   createdAt: string | null;
   hoursUnscheduled: number;
+  // Pre-tax subtotal — HCP's "Job revenue earned" report sums this, not total_amount.
+  subtotal: number | null;
 };
 
 export type EstimateBucket = "unscheduled" | "scheduled" | "completed" | "won" | "canceled" | "other";
@@ -29,17 +31,25 @@ export type Estimate = {
   daysSinceSent: number;
   hoursWaiting: number;
   bucket: EstimateBucket;
+  // HCP conversion bucket from option approval_status: won (any option approved),
+  // lost (any declined), open (pending), excluded (canceled — not counted at all).
+  convBucket: "won" | "lost" | "open" | "excluded";
 };
 
 export type Invoice = {
   id: string;
   number: string;
+  jobNumber: string;
   customer: string;
-  total: number;
+  amount: number; // invoice amount
+  total: number; // amount due (outstanding)
   due: string | null;
   daysOverdue: number;
   status: string;
   service: string;
+  latestSendDate: string | null;
+  created: string | null;
+  daysOut: number; // days since created
 };
 
 export type Customer = {
@@ -87,7 +97,8 @@ export type Aging = {
   days_90_plus: number;
 };
 
-export type Period = "wtd" | "mtd" | "qtd" | "ytd";
+// Custom date range. start/end are ISO date strings (YYYY-MM-DD), both inclusive.
+export type DateRange = { start: string; end: string };
 
 export type KPIs = {
   total_revenue: number;
@@ -97,6 +108,8 @@ export type KPIs = {
   jobs_in_progress: number;
   jobs_this_month: number;
   jobs_this_period: number;
+  // Job count = jobs CREATED in range, all statuses except canceled (HCP "Job count" report).
+  jobs_created_count: number;
   completed_jobs: number;
   cancelled_jobs: number;
   ar_balance: number;
@@ -189,8 +202,9 @@ export type DashboardData = {
     avgMarginPct: number;
   };
   fetchedAt: string;
-  period: Period;
+  range: DateRange;
   periodLabel: string;
   periodStart: string;
+  periodEnd: string;
   errors?: Record<string, string>;
 };

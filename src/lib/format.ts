@@ -1,6 +1,6 @@
 export const fmtMoney = (val: number | null | undefined): string => {
   if (val == null || (typeof val === "number" && !Number.isFinite(val))) return "—";
-  return "$" + Number(val).toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 });
+  return "$" + Number(val).toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 };
 
 export const fmtDate = (d: string | null | undefined): string => {
@@ -8,6 +8,17 @@ export const fmtDate = (d: string | null | undefined): string => {
   const dt = new Date(d);
   if (isNaN(dt.getTime())) return "—";
   return dt.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "2-digit" });
+};
+
+export const fmtDateTime = (d: string | null | undefined): string => {
+  if (!d) return "—";
+  const dt = new Date(d);
+  if (isNaN(dt.getTime())) return "—";
+  return (
+    dt.toLocaleDateString("en-US", { month: "numeric", day: "numeric", year: "2-digit" }) +
+    " " +
+    dt.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false })
+  );
 };
 
 export const badgeClass = (s: string | null | undefined): string => {

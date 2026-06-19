@@ -3,14 +3,6 @@
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useDashboard } from "./DashboardProvider";
-import type { Period } from "@/lib/types";
-
-const PERIODS: { key: Period; label: string }[] = [
-  { key: "wtd", label: "WTD" },
-  { key: "mtd", label: "MTD" },
-  { key: "qtd", label: "QTD" },
-  { key: "ytd", label: "YTD" },
-];
 
 const titles: Record<string, string> = {
   "/": "Command Center",
@@ -27,7 +19,7 @@ const titles: Record<string, string> = {
 
 export default function Topbar() {
   const pathname = usePathname();
-  const { status, statusText, refresh, errorMsg, period, setPeriod, data } = useDashboard();
+  const { status, statusText, refresh, errorMsg, range, setRange } = useDashboard();
   const [dateStr, setDateStr] = useState<string>("");
 
   useEffect(() => {
@@ -50,17 +42,24 @@ export default function Topbar() {
           {dateStr && <span className="date-badge">{dateStr}</span>}
         </div>
         <div className="topbar-right">
-          <div className="period-filter" role="group" aria-label="Time period">
-            {PERIODS.map((p) => (
-              <button
-                key={p.key}
-                className={`period-btn ${period === p.key ? "active" : ""}`}
-                onClick={() => setPeriod(p.key)}
-                title={p.key === period && data ? `Since ${new Date(data.periodStart).toLocaleDateString()}` : undefined}
-              >
-                {p.label}
-              </button>
-            ))}
+          <div className="date-range-filter" role="group" aria-label="Date range">
+            <input
+              type="date"
+              className="date-input"
+              aria-label="Start date"
+              value={range.start}
+              max={range.end}
+              onChange={(e) => e.target.value && setRange({ ...range, start: e.target.value })}
+            />
+            <span className="date-range-sep">→</span>
+            <input
+              type="date"
+              className="date-input"
+              aria-label="End date"
+              value={range.end}
+              min={range.start}
+              onChange={(e) => e.target.value && setRange({ ...range, end: e.target.value })}
+            />
           </div>
           <div className="status-bar">
             <div className={`status-dot ${status}`} />

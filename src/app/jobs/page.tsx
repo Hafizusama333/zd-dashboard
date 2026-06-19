@@ -2,12 +2,13 @@
 
 import { useState } from "react";
 import ChatPanel from "@/components/ChatPanel";
+import DataSourceTooltip from "@/components/DataSourceTooltip";
 import { useDashboard } from "@/components/DashboardProvider";
 import StatusBadge from "@/components/StatusBadge";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import type { Job } from "@/lib/types";
 
-type Filter = "all" | "in_progress" | "needs_scheduling" | "overdue";
+type Filter = "all" | "in_progress" | "needs_scheduling" | "scheduled";
 
 const fmtAge = (hours: number): string =>
   hours <= 0 ? "—" : hours >= 48 ? `${Math.floor(hours / 24)}d` : `${Math.round(hours)}h`;
@@ -22,11 +23,7 @@ export default function JobsPage() {
     if (filter === "all") return true;
     if (filter === "in_progress") return j.status === "in_progress";
     if (filter === "needs_scheduling") return j.status === "needs_scheduling";
-    if (filter === "overdue") {
-      if (!j.scheduled) return false;
-      return new Date(j.scheduled).getTime() < Date.now() &&
-        ["scheduled", "in_progress", "needs_scheduling"].includes(j.status);
-    }
+    if (filter === "scheduled") return j.status === "scheduled";
     return true;
   };
 
@@ -34,11 +31,7 @@ export default function JobsPage() {
     all: jobs.length,
     in_progress: jobs.filter((j) => j.status === "in_progress").length,
     needs_scheduling: jobs.filter((j) => j.status === "needs_scheduling").length,
-    overdue: jobs.filter((j) =>
-      j.scheduled &&
-      new Date(j.scheduled).getTime() < Date.now() &&
-      ["scheduled", "in_progress", "needs_scheduling"].includes(j.status),
-    ).length,
+    scheduled: jobs.filter((j) => j.status === "scheduled").length,
   };
 
   const needsScheduling = jobs
@@ -56,14 +49,24 @@ export default function JobsPage() {
             <FTab on={filter === "all"} onClick={() => setFilter("all")}>All Jobs ({counts.all})</FTab>
             <FTab on={filter === "in_progress"} onClick={() => setFilter("in_progress")}>In Progress ({counts.in_progress})</FTab>
             <FTab on={filter === "needs_scheduling"} onClick={() => setFilter("needs_scheduling")}>Needs Scheduling ({counts.needs_scheduling})</FTab>
-            <FTab on={filter === "overdue"} onClick={() => setFilter("overdue")}>Overdue ({counts.overdue})</FTab>
+            <FTab on={filter === "scheduled"} onClick={() => setFilter("scheduled")}>Scheduled ({counts.scheduled})</FTab>
           </div>
 
           {filter === "all" && (
             <>
               <div className="card section-gap">
                 <div className="card-header">
-                  <span className="card-title">Jobs — Needs Scheduling</span>
+                  <span className="card-title">
+                    Jobs — Needs Scheduling
+                    <DataSourceTooltip
+                      source="HousecallPro /jobs via /api/dashboard"
+                      filters={[
+                        "status = needs_scheduling",
+                        "Sorted by hours unscheduled (desc), top 15",
+                      ]}
+                      time="range"
+                    />
+                  </span>
                   <span className="badge badge-red">Urgent</span>
                 </div>
                 <div style={{ padding: 0 }}>
@@ -105,7 +108,14 @@ export default function JobsPage() {
 
               <div className="card section-gap">
                 <div className="card-header">
-                  <span className="card-title">In Progress</span>
+                  <span className="card-title">
+                    In Progress
+                    <DataSourceTooltip
+                      source="HousecallPro /jobs via /api/dashboard"
+                      filters={["status = in_progress", "First 10"]}
+                      time="range"
+                    />
+                  </span>
                   <span style={{ fontSize: 11, color: "var(--text-2)" }}>{counts.in_progress} active</span>
                 </div>
                 <div style={{ padding: 0 }}>
@@ -135,7 +145,17 @@ export default function JobsPage() {
 
               <div className="card">
                 <div className="card-header">
-                  <span className="card-title">Dispatch Optimization — Route Clusters</span>
+                  <span className="card-title">
+                    Dispatch Optimization — Route Clusters
+                    <DataSourceTooltip
+                      source="HousecallPro /jobs via /api/dashboard"
+                      filters={[
+                        "Open jobs grouped by ZIP",
+                        "Sorted by total value (desc)",
+                      ]}
+                      time="range"
+                    />
+                  </span>
                   <span style={{ fontSize: 11, color: "var(--text-2)" }}>By ZIP corridor</span>
                 </div>
                 <div className="card-body">
@@ -173,7 +193,14 @@ export default function JobsPage() {
           {filter !== "all" && (
             <div className="card">
               <div className="card-header">
-                <span className="card-title">Filtered Jobs</span>
+                <span className="card-title">
+                  Filtered Jobs
+                  <DataSourceTooltip
+                    source="HousecallPro /jobs via /api/dashboard"
+                    filters={[`status = ${filter}`, "First 50"]}
+                    time="range"
+                  />
+                </span>
                 <span style={{ fontSize: 11, color: "var(--text-2)" }}>{filtered.length} shown</span>
               </div>
               <div className="table-scroll" style={{ padding: 0 }}>

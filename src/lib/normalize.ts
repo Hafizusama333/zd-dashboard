@@ -3,6 +3,7 @@ import type {
   CashFlow,
   Contractor,
   Customer,
+  DateRange,
   Estimate,
   FireItem,
   Invoice,
@@ -101,36 +102,35 @@ const guessService = (description: string): string => {
 
 const ZD_GENERIC_ID = "pro_ace920fd9c4344e78367974cf1e4b5d5";
 
-export type Period = "wtd" | "mtd" | "qtd" | "ytd";
-
-// Start (inclusive) of the to-date window for `period`, relative to `now`.
-// wtd = Sunday 00:00 of current week, mtd = 1st of month, qtd = 1st of quarter, ytd = Jan 1.
-export function periodStart(period: Period, now: Date = new Date()): Date {
-  const y = now.getFullYear();
-  switch (period) {
-    case "wtd": {
-      const d = new Date(y, now.getMonth(), now.getDate());
-      d.setDate(d.getDate() - d.getDay()); // back to Sunday
-      return d;
-    }
-    case "qtd": {
-      const q = Math.floor(now.getMonth() / 3) * 3;
-      return new Date(y, q, 1);
-    }
-    case "ytd":
-      return new Date(y, 0, 1);
-    case "mtd":
-    default:
-      return new Date(y, now.getMonth(), 1);
-  }
+// Inclusive start (00:00 local) of an ISO date string (YYYY-MM-DD).
+export function rangeStart(start: string): Date {
+  const [y, m, d] = start.split("-").map(Number);
+  return new Date(y, (m || 1) - 1, d || 1, 0, 0, 0, 0);
 }
 
-export const PERIOD_LABELS: Record<Period, string> = {
-  wtd: "Week to date",
-  mtd: "Month to date",
-  qtd: "Quarter to date",
-  ytd: "Year to date",
-};
+// Exclusive upper bound = end date + 1 day at 00:00, so the end day is fully inclusive.
+export function rangeEndExclusive(end: string): Date {
+  const [y, m, d] = end.split("-").map(Number);
+  return new Date(y, (m || 1) - 1, (d || 1) + 1, 0, 0, 0, 0);
+}
+
+// Default range: last day of previous month → today.
+export function defaultRange(now: Date = new Date()): DateRange {
+  const lastOfPrevMonth = new Date(now.getFullYear(), now.getMonth(), 0);
+  return { start: toISODate(lastOfPrevMonth), end: toISODate(now) };
+}
+
+export function toISODate(d: Date): string {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
+export function rangeLabel(range: DateRange): string {
+  const fmt = (s: string) => rangeStart(s).toLocaleDateString();
+  return `${fmt(range.start)} – ${fmt(range.end)}`;
+}
 
 // The date HCP attributes a completed job to (revenue/job-count basis).
 // Jobs frequently have a null scheduled_start, so completed_at is the source of truth;
@@ -138,6 +138,21 @@ export const PERIOD_LABELS: Record<Period, string> = {
 export function jobCompletedDate(raw: AnyRec): string | null {
   const wts = pick<AnyRec>(raw, "work_timestamps") || {};
   return (
+    (pick(wts, "completed_at") as string) ||
+    (pick(raw, "created_at", "created") as string) ||
+    null
+  );
+}
+
+// The "Scheduled" date HCP's "Job revenue earned" report windows by.
+// Reads schedule.scheduled_start (falls back to arrival window / top-level), then
+// completed_at, then created_at — so a job without a scheduled_start still lands somewhere.
+export function jobScheduledDate(raw: AnyRec): string | null {
+  const schedule = pick<AnyRec>(raw, "schedule") || {};
+  const wts = pick<AnyRec>(raw, "work_timestamps") || {};
+  return (
+    (pick(schedule, "scheduled_start", "arrival_window_start") as string) ||
+    (pick(raw, "scheduled_start") as string) ||
     (pick(wts, "completed_at") as string) ||
     (pick(raw, "created_at", "created") as string) ||
     null
@@ -189,7 +204,28 @@ export function normalizeJob(raw: AnyRec): Job {
     zip: zipOf(address),
     createdAt,
     hoursUnscheduled: status === "needs_scheduling" ? hoursSince(createdAt) : 0,
+    subtotal: pick(raw, "subtotal") !== undefined ? money(pick(raw, "subtotal")) : null,
   };
+}
+
+// Sum of pre-tax subtotal over the given jobs — HCP's "Job revenue earned" figure.
+// Falls back to total when subtotal is absent.
+export function sumJobRevenue(jobs: Job[]): number {
+  return jobs.reduce((acc, j) => acc + (j.subtotal ?? j.total ?? 0), 0);
+}
+
+// Job count = jobs CREATED within [start, end] (inclusive), all statuses except canceled.
+// Mirrors HCP's "Job count" report (Displaying jobs Created from <range>, filtered by
+// Completed + In progress + Scheduled + Unscheduled — i.e. every status but canceled).
+export function countJobsCreated(jobs: Job[], range: DateRange): number {
+  const start = rangeStart(range.start).getTime();
+  const end = rangeEndExclusive(range.end).getTime();
+  return jobs.filter((j) => {
+    if (CANCELLED(j.status)) return false;
+    if (!j.createdAt) return false;
+    const t = new Date(j.createdAt).getTime();
+    return Number.isFinite(t) && t >= start && t < end;
+  }).length;
 }
 
 export function normalizeEstimate(raw: AnyRec): Estimate {
@@ -222,7 +258,41 @@ export function normalizeEstimate(raw: AnyRec): Estimate {
     daysSinceSent,
     hoursWaiting: hoursSince(created),
     bucket: estimateBucket(status),
+    convBucket: estimateConvBucket(options, status),
   };
+}
+
+// HCP "Estimate conversion" buckets an estimate by its options' approval_status:
+//   won  = any option approved / pro approved
+//   lost = any option declined / pro declined
+//   open = neither (pending)
+//   excluded = canceled estimate (HCP drops these from the total entirely)
+// Conversion rate = won / (won + lost + open).
+const APPROVED_OPT = new Set(["approved", "pro approved", "pro_approved"]);
+const DECLINED_OPT = new Set(["declined", "pro declined", "pro_declined"]);
+function estimateConvBucket(options: AnyRec[], status: string): "won" | "lost" | "open" | "excluded" {
+  const sts = options.map((o) => s(pick(o, "approval_status")).toLowerCase());
+  if (sts.some((x) => APPROVED_OPT.has(x))) return "won";
+  if (sts.some((x) => DECLINED_OPT.has(x))) return "lost";
+  if (status.includes("cancel")) return "excluded";
+  return "open";
+}
+
+// Estimate conversion % over estimates CREATED in range, per HCP's report.
+export function computeConversion(estimates: Estimate[], range: DateRange): number {
+  const start = rangeStart(range.start).getTime();
+  const end = rangeEndExclusive(range.end).getTime();
+  let won = 0;
+  let denom = 0;
+  for (const e of estimates) {
+    if (!e.created) continue;
+    const t = new Date(e.created).getTime();
+    if (!Number.isFinite(t) || t < start || t >= end) continue;
+    if (e.convBucket === "excluded") continue;
+    denom += 1;
+    if (e.convBucket === "won") won += 1;
+  }
+  return denom > 0 ? (won / denom) * 100 : 0;
 }
 
 // Client priorities: unscheduled (not attended) and completed (visited, need invoice).
@@ -235,7 +305,12 @@ function estimateBucket(status: string): import("./types").EstimateBucket {
   return "other";
 }
 
-export function normalizeInvoice(raw: AnyRec, jobCustomerMap?: Map<string, string>, jobServiceMap?: Map<string, string>): Invoice {
+export function normalizeInvoice(
+  raw: AnyRec,
+  jobCustomerMap?: Map<string, string>,
+  jobServiceMap?: Map<string, string>,
+  jobNumberMap?: Map<string, string>,
+): Invoice {
   const customer = pick<AnyRec>(raw, "customer") || {};
   const jobId = s(pick(raw, "job_id"));
   const due = (pick(raw, "due_at", "due_date") as string) || null;
@@ -244,15 +319,25 @@ export function normalizeInvoice(raw: AnyRec, jobCustomerMap?: Map<string, strin
     : 0;
   const linkedCustomer = jobId && jobCustomerMap ? jobCustomerMap.get(jobId) : undefined;
   const linkedService = jobId && jobServiceMap ? jobServiceMap.get(jobId) : undefined;
+  const jobNumber = jobId && jobNumberMap ? jobNumberMap.get(jobId) || "" : "";
+  const created = (pick(raw, "invoice_date", "created_at", "created") as string) || null;
+  const daysOut = created
+    ? Math.max(0, Math.floor((Date.now() - new Date(created).getTime()) / 86400000))
+    : 0;
   return {
     id: s(pick(raw, "id", "uuid")),
     number: s(pick(raw, "invoice_number", "number", "id")),
+    jobNumber,
     customer: linkedCustomer || customerName(customer),
+    amount: money(pick(raw, "amount", "total_amount", "total")),
     total: money(pick(raw, "due_amount", "amount_due", "balance_due", "amount", "total_amount", "total")),
     due,
     daysOverdue,
     status: s(pick(raw, "status", "payment_status"), "unpaid").toLowerCase().replace(/ /g, "_"),
     service: linkedService || "Other",
+    latestSendDate: (pick(raw, "sent_at") as string) || null,
+    created,
+    daysOut,
   };
 }
 
@@ -306,15 +391,39 @@ function completedSince(j: Job, startMs: number): boolean {
   return Number.isFinite(t) && t >= startMs;
 }
 
+// True when job `j`'s Scheduled date falls within [startMs, endMs) — start inclusive,
+// end exclusive. Mirrors HCP's "Job revenue earned" report, which windows by the
+// scheduled date. Falls back to completed/created so jobs without a scheduled_start
+// still land somewhere (same order as jobScheduledDate).
+function scheduledWithin(j: Job, startMs: number, endMs: number): boolean {
+  const iso = j.scheduled || j.completedAt || j.createdAt;
+  if (!iso) return false;
+  const t = new Date(iso).getTime();
+  return Number.isFinite(t) && t >= startMs && t < endMs;
+}
+
 export function computeKPIs(args: {
   jobs: Job[];
   estimates: Estimate[];
   ar: Invoice[];
   agingTotal: number;
-  period?: Period;
+  range?: DateRange;
   now?: Date;
+  // Job revenue earned for the range, computed from the precise server-side filtered
+  // fetch (scheduled-in-range + completed, summed by subtotal). When provided, these
+  // override the values derived from the general `jobs` array.
+  periodRevenueOverride?: number;
+  periodJobsOverride?: number;
+  // Job count (created-in-range, non-canceled) from a created-windowed fetch.
+  jobsCreatedCountOverride?: number;
+  // Gross profit margin % for the range, from the revenue set's line items.
+  grossMarginOverride?: number | null;
+  // Estimate conversion % (HCP approval-bucket formula). When omitted, falls back
+  // to the legacy won/closed heuristic.
+  conversionOverride?: number;
 }): KPIs {
-  const { jobs, estimates, ar, agingTotal, period = "mtd", now = new Date() } = args;
+  const { jobs, estimates, ar, agingTotal, range, now = new Date(), periodRevenueOverride, periodJobsOverride, jobsCreatedCountOverride, grossMarginOverride, conversionOverride } = args;
+  const effRange = range ?? defaultRange(now);
   const completed = jobs.filter((j) => COMPLETE(j.status));
   const cancelled = jobs.filter((j) => CANCELLED(j.status));
   const open = jobs.filter((j) => OPEN_JOB(j.status));
@@ -322,7 +431,7 @@ export function computeKPIs(args: {
   const openEstimates = estimates.filter((e) => OPEN_EST(e.status));
   const wonEstimates = estimates.filter((e) => e.status === "created_job_from_estimate");
   const closedEstimates = estimates.length - openEstimates.length;
-  const conversion = closedEstimates > 0 ? (wonEstimates.length / closedEstimates) * 100 : 0;
+  const conversion = conversionOverride ?? (closedEstimates > 0 ? (wonEstimates.length / closedEstimates) * 100 : 0);
 
   // MTD figures (kept for back-compat) computed by completed_at, not scheduled_start —
   // ~40% of completed jobs have a null scheduled_start, which previously dropped them.
@@ -330,12 +439,20 @@ export function computeKPIs(args: {
   const monthJobs = completed.filter((j) => completedSince(j, monthStart));
   const monthlyRevenue = monthJobs.reduce((acc, j) => acc + (j.total || 0), 0);
 
-  // Selected period (wtd/mtd/qtd/ytd), same completed_at basis.
-  const pStart = periodStart(period, now).getTime();
-  const periodJobs = completed.filter((j) => completedSince(j, pStart));
-  const periodRevenue = periodJobs.reduce((acc, j) => acc + (j.total || 0), 0);
+  // Selected custom date range. Job revenue earned = completed jobs whose Scheduled
+  // date falls in the range — matches HCP's "Job revenue earned" report
+  // (Displaying jobs Scheduled from <range>, filtered by Job status is Completed).
+  const pStart = rangeStart(effRange.start).getTime();
+  const pEnd = rangeEndExclusive(effRange.end).getTime();
+  const periodJobsList = completed.filter((j) => scheduledWithin(j, pStart, pEnd));
+  // Prefer the precise server-side figures (subtotal basis) when supplied.
+  const periodRevenue = periodRevenueOverride ?? sumJobRevenue(periodJobsList);
+  const periodJobCount = periodJobsOverride ?? periodJobsList.length;
+  // Job count: created-in-range, non-canceled. Prefer the precise created-windowed fetch.
+  const jobsCreatedCount = jobsCreatedCountOverride ?? countJobsCreated(jobs, effRange);
 
-  const totalRevenue = completed.reduce((acc, j) => acc + (j.total || 0), 0);
+  // Exact same figure as period revenue (per request).
+  const totalRevenue = periodRevenue;
   const collectionRate = totalRevenue + agingTotal > 0
     ? (totalRevenue / (totalRevenue + agingTotal)) * 100
     : 0;
@@ -364,18 +481,20 @@ export function computeKPIs(args: {
     open_jobs: open.length,
     jobs_in_progress: inProg.length,
     jobs_this_month: monthJobs.length,
-    jobs_this_period: periodJobs.length,
+    jobs_this_period: periodJobCount,
+    jobs_created_count: jobsCreatedCount,
     completed_jobs: completed.length,
     cancelled_jobs: cancelled.length,
     ar_balance: ar.reduce((acc, i) => acc + i.total, 0),
     ar_critical: arCritical,
     open_estimates: openEstimates.length,
-    pipeline_value: openEstimates.reduce((acc, e) => acc + e.total, 0),
+    // Pipeline value = open (unpaid) invoices, i.e. the AR balance.
+    pipeline_value: ar.reduce((acc, i) => acc + i.total, 0),
     collection_rate: collectionRate,
     conversion_rate: conversion,
     avg_estimate_value: avgEstValue,
     avg_days_to_close: avgDaysToClose,
-    gross_margin_pct: 41,
+    gross_margin_pct: grossMarginOverride ?? 41,
   };
 }
 
@@ -391,7 +510,7 @@ export function computeFireItems(args: { ar: Invoice[]; jobs: Job[]; estimates: 
     const sum = overdue30.reduce((a, b) => a + b.total, 0);
     out.push({
       severity: "critical",
-      message: `${overdue30.length} invoice${overdue30.length === 1 ? "" : "s"} 30+ days overdue — $${Math.round(sum).toLocaleString()}`,
+      message: `${overdue30.length} invoice${overdue30.length === 1 ? "" : "s"} 30+ days overdue — $${sum.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
       target: "ar",
     });
   }
@@ -697,6 +816,23 @@ export function summarizeMaterials(jobs: MaterialJob[]) {
   const jobCount = jobs.length;
   const avgMarginPct = totalRevenue > 0 ? (totalMargin / totalRevenue) * 100 : 0;
   return { totalLaborCost, totalRevenue, totalMargin, jobCount, avgMarginPct };
+}
+
+// Gross profit margin over a set of jobs' line items, matching HCP's report:
+// margin% = (revenue - cost) / revenue, where revenue = sum of non-tax line amounts
+// and cost = sum of unit_cost * quantity over non-tax lines. Returns null when no revenue.
+export function computeGrossMargin(itemSets: HCPLineItem[][]): number | null {
+  let revenue = 0;
+  let cost = 0;
+  for (const items of itemSets) {
+    for (const it of items) {
+      if (it.kind === "tax") continue;
+      revenue += money(it.amount);
+      cost += money(it.unit_cost) * n(it.quantity);
+    }
+  }
+  if (revenue <= 0) return null;
+  return ((revenue - cost) / revenue) * 100;
 }
 
 export function computeCashFlow(args: { kpis: KPIs; ar: Invoice[]; pipeline: number }): CashFlow {

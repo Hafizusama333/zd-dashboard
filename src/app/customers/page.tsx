@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import DataSourceTooltip from "@/components/DataSourceTooltip";
 import { useDashboard } from "@/components/DashboardProvider";
 import { fmtMoney } from "@/lib/format";
 
@@ -25,7 +26,19 @@ export default function CustomersPage() {
     <div className="page">
       <div className="card">
         <div className="card-header">
-          <span className="card-title">Customer Performance</span>
+          <span className="card-title">
+            Customer Performance
+            <DataSourceTooltip
+              source="HousecallPro /jobs + /estimates via /api/dashboard"
+              filters={[
+                "Business customers rolled up from jobs & estimates in range",
+                filter === "active" ? "Active only (≥1 job or estimate)" : "All customers",
+                query.trim() ? `Search: "${query.trim()}"` : "No search filter",
+                "First 200",
+              ]}
+              time="range"
+            />
+          </span>
           <span style={{ fontSize: 11, color: "var(--text-2)" }}>
             {filtered.length} shown · {activeCount} active · {stats.length} total
           </span>

@@ -3,8 +3,9 @@
 import { useState } from "react";
 import AgingRow from "@/components/AgingRow";
 import ChatPanel from "@/components/ChatPanel";
+import DataSourceTooltip from "@/components/DataSourceTooltip";
 import { useDashboard } from "@/components/DashboardProvider";
-import { fmtDate, fmtMoney } from "@/lib/format";
+import { fmtDateTime, fmtMoney } from "@/lib/format";
 
 type ARFilter = "all" | "overdue30";
 
@@ -40,11 +41,39 @@ export default function ARPage() {
   });
   const overdue30Count = ar.filter((i) => i.daysOverdue >= 30).length;
 
+  // Group invoices by customer so each customer's rows sit together. Customers are
+  // ordered by their most-overdue invoice (max daysOut); within a customer, rows are
+  // sorted by daysOut desc.
+  const grouped = (() => {
+    const byCustomer = new Map<string, typeof visible>();
+    for (const inv of visible) {
+      const key = inv.customer || "—";
+      if (!byCustomer.has(key)) byCustomer.set(key, []);
+      byCustomer.get(key)!.push(inv);
+    }
+    const groups = Array.from(byCustomer.values()).map((rows) =>
+      [...rows].sort((a, b) => b.daysOut - a.daysOut),
+    );
+    groups.sort((a, b) => b[0].daysOut - a[0].daysOut);
+    return groups.flat();
+  })();
+
   return (
     <div className="page">
       <div className="grid-chat">
         <div>
-          <div className="kpi-grid section-gap">
+          <div className="section-head section-gap">
+            <span className="section-head-label">AR Summary</span>
+            <DataSourceTooltip
+              source="HousecallPro /invoices via /api/dashboard"
+              filters={[
+                "status = open (unpaid), server-side filtered",
+                "Bucketed by days past due date",
+              ]}
+              time="all-time"
+            />
+          </div>
+          <div className="kpi-grid">
             <KPI label="Total Outstanding" value={fmtMoney(k?.ar_balance ?? 0)} valueClass="down" meta={`${ar.length} open invoices`} />
             <KPI label="0–30 Days" value={fmtMoney(aging ? aging.current + aging.days_1_30 : 0)} valueClass="up" meta={`${ar.filter((i) => i.daysOverdue <= 30).length} invoices`} />
             <KPI label="31–60 Days" value={fmtMoney(aging?.days_31_60 ?? 0)} valueClass="warn" meta={`${ar.filter((i) => i.daysOverdue > 30 && i.daysOverdue <= 60).length} invoices`} />
@@ -53,7 +82,14 @@ export default function ARPage() {
 
           <div className="card section-gap">
             <div className="card-header">
-              <span className="card-title">AR Aging Breakdown</span>
+              <span className="card-title">
+                AR Aging Breakdown
+                <DataSourceTooltip
+                  source="HousecallPro /invoices via /api/dashboard"
+                  filters={["status = open", "Aged by due date into 30-day tiers"]}
+                  time="all-time"
+                />
+              </span>
               <span style={{ fontSize: 12, color: "var(--text-2)" }}>
                 Collection rate: {k ? `${Math.round(k.collection_rate)}%` : "—"} · Target 90%
               </span>
@@ -74,8 +110,20 @@ export default function ARPage() {
 
           <div className="card">
             <div className="card-header">
-              <span className="card-title">Open Invoices</span>
-              <button className="action-btn primary">Draft all collection emails →</button>
+              <span className="card-title">
+                Open Invoices
+                <DataSourceTooltip
+                  source="HousecallPro /invoices via /api/dashboard"
+                  filters={[
+                    "status = open (unpaid)",
+                    filter === "overdue30"
+                      ? `daysOverdue ≥ 30 AND due date in ${startDate} → ${endDate}`
+                      : "All open invoices",
+                    "Grouped by customer, sorted by days-out (desc), first 50",
+                  ]}
+                  time="all-time"
+                />
+              </span>
             </div>
             <div style={{ padding: "12px 16px", borderBottom: "1px solid var(--border)", display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap" }}>
               <div className="filter-tabs" style={{ marginBottom: 0 }}>
@@ -101,42 +149,32 @@ export default function ARPage() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Customer</th><th>Invoice</th><th>Service</th><th>Amount</th><th>Days Out</th><th>Status</th><th>Action</th>
+                    <th>Invoice #</th><th>Job #</th><th>Customer</th><th>Invoice amount</th><th>Amount due</th><th>Latest send date</th><th>Created date</th><th>Days out</th>
                   </tr>
                 </thead>
                 <tbody>
                   {visible.length === 0 ? (
-                    <tr><td colSpan={7} className="empty">{data ? "No invoices match" : "Loading..."}</td></tr>
+                    <tr><td colSpan={8} className="empty">{data ? "No invoices match" : "Loading..."}</td></tr>
                   ) : (
-                    [...visible].sort((a, b) => b.daysOverdue - a.daysOverdue).slice(0, 50).map((inv) => {
+                    grouped.slice(0, 50).map((inv) => {
                       const critical = inv.daysOverdue > 30;
                       return (
                         <tr key={inv.id} style={critical ? { background: "var(--red-light)" } : undefined}>
+                          <td className="mono">{inv.number}</td>
+                          <td className="mono">{inv.jobNumber || "—"}</td>
                           <td><b>{inv.customer}</b></td>
-                          <td className="mono">#{inv.number}</td>
-                          <td>{inv.service}</td>
+                          <td className="mono">{fmtMoney(inv.amount)}</td>
                           <td className="mono">{fmtMoney(inv.total)}</td>
+                          <td>{fmtDateTime(inv.latestSendDate)}</td>
+                          <td>{fmtDateTime(inv.created)}</td>
                           <td>
                             <span style={{
-                              color: inv.daysOverdue > 60 ? "var(--red)" : inv.daysOverdue > 30 ? "var(--amber)" : "inherit",
+                              color: inv.daysOut > 60 ? "var(--red)" : inv.daysOut > 30 ? "var(--amber)" : "inherit",
                               fontWeight: critical ? 600 : 400,
                             }}>
-                              {inv.daysOverdue}d
+                              {inv.daysOut}d
                             </span>
                           </td>
-                          <td>
-                            {inv.daysOverdue > 60 ? <span className="badge badge-red">Critical 60+</span> :
-                             inv.daysOverdue > 30 ? <span className="badge badge-red">Overdue 30+</span> :
-                             inv.daysOverdue > 15 ? <span className="badge badge-amber">Late</span> :
-                             inv.daysOverdue > 0 ? <span className="badge badge-blue">Current</span> :
-                             <span className="badge badge-green">New</span>}
-                          </td>
-                          <td>
-                            <button className={`action-btn ${critical ? "danger" : ""}`}>
-                              {critical ? "Demand letter →" : "Remind →"}
-                            </button>
-                          </td>
-                          <td style={{ display: "none" }}>{fmtDate(inv.due)}</td>
                         </tr>
                       );
                     })

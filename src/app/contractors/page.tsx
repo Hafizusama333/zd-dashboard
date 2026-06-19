@@ -1,6 +1,7 @@
 "use client";
 
 import ChatPanel from "@/components/ChatPanel";
+import DataSourceTooltip from "@/components/DataSourceTooltip";
 import { useDashboard } from "@/components/DashboardProvider";
 import { fmtMoney } from "@/lib/format";
 
@@ -33,7 +34,18 @@ export default function ContractorsPage() {
         <div>
           <div className="card section-gap">
             <div className="card-header">
-              <span className="card-title">Contractor Scorecard</span>
+              <span className="card-title">
+                Contractor Scorecard
+                <DataSourceTooltip
+                  source="HousecallPro /jobs + /estimates via /api/dashboard"
+                  filters={[
+                    "Jobs & estimates in range, grouped by assigned contractor",
+                    "Complete% = completed ÷ assigned; cancel rate drives flags",
+                    "First 20",
+                  ]}
+                  time="range"
+                />
+              </span>
               <span className="card-action">Export →</span>
             </div>
             <div className="table-scroll" style={{ padding: 0 }}>
@@ -90,7 +102,17 @@ export default function ContractorsPage() {
 
           <div className="card">
             <div className="card-header">
-              <span className="card-title">Pricing Consistency vs Company Average</span>
+              <span className="card-title">
+                Pricing Consistency vs Company Average
+                <DataSourceTooltip
+                  source="HousecallPro /jobs via /api/dashboard"
+                  filters={[
+                    "Each contractor's avg job value vs company avg (mean of service baselines)",
+                    "Variance flags over/under-pricing, first 10",
+                  ]}
+                  time="range"
+                />
+              </span>
             </div>
             <div className="table-scroll" style={{ padding: 0 }}>
               <table className="data-table">

@@ -2,9 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import ChatPanel from "@/components/ChatPanel";
+import DataSourceTooltip from "@/components/DataSourceTooltip";
 import { fmtDate } from "@/lib/format";
 import { useDashboard } from "@/components/DashboardProvider";
-import { periodStart, PERIOD_LABELS } from "@/lib/normalize";
+import { rangeStart, rangeEndExclusive } from "@/lib/normalize";
 
 type LiveEmail = {
   uid: number;
@@ -46,7 +47,8 @@ export default function EmailsPage() {
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
   const [selected, setSelected] = useState<LiveEmail | null>(null);
-  const { period } = useDashboard();
+  const { range, data: dashData } = useDashboard();
+  const rangeLabelStr = dashData?.periodLabel ?? "selected range";
 
   useEffect(() => {
     let cancelled = false;
@@ -74,12 +76,17 @@ export default function EmailsPage() {
     };
   }, []);
 
-  // Filter by the global time period (WTD/MTD/QTD/YTD from the Topbar). Emails
-  // with no parseable date are dropped from period-scoped views.
+  // Filter by the global date range (from the Topbar). Emails within [start, end]
+  // inclusive are kept; those with no parseable date are dropped.
   const periodEmails = useMemo(() => {
-    const start = periodStart(period).getTime();
-    return emails.filter((e) => e.date !== null && new Date(e.date).getTime() >= start);
-  }, [emails, period]);
+    const start = rangeStart(range.start).getTime();
+    const end = rangeEndExclusive(range.end).getTime();
+    return emails.filter((e) => {
+      if (e.date === null) return false;
+      const t = new Date(e.date).getTime();
+      return t >= start && t < end;
+    });
+  }, [emails, range]);
 
   const kpis = useMemo(() => {
     let unread = 0;
@@ -110,11 +117,12 @@ export default function EmailsPage() {
     );
   }, [sorted, search]);
 
-  // Reset to first page when the search or period changes — during render, not
+  // Reset to first page when the search or range changes — during render, not
   // in an effect, to avoid a cascading re-render.
-  const [prevKey, setPrevKey] = useState(search + "|" + period);
-  if (search + "|" + period !== prevKey) {
-    setPrevKey(search + "|" + period);
+  const rangeKey = range.start + ".." + range.end;
+  const [prevKey, setPrevKey] = useState(search + "|" + rangeKey);
+  if (search + "|" + rangeKey !== prevKey) {
+    setPrevKey(search + "|" + rangeKey);
     setPage(1);
   }
 
@@ -136,6 +144,19 @@ export default function EmailsPage() {
       )}
 
       {state === "live" && (
+        <>
+        <div className="section-head section-gap">
+          <span className="section-head-label">Inbox Metrics</span>
+          <DataSourceTooltip
+            source="Gmail inbox via /api/emails (latest 250 messages)"
+            filters={[
+              "Received date within selected range",
+              "Emails with no parseable date excluded",
+              "Stale = unread & age ≥ 24h",
+            ]}
+            time="range"
+          />
+        </div>
         <div className="kpi-grid section-gap">
           <KPI label="Total Emails" value={String(kpis.total)} meta={`${kpis.senders} senders`} />
           <KPI label="Unread" value={String(kpis.unread)} valueClass="warn" meta="Awaiting triage" />
@@ -147,13 +168,25 @@ export default function EmailsPage() {
           />
           <KPI label="Inbox" value={String(kpis.total)} meta="Latest 250 messages" />
         </div>
+        </>
       )}
 
       <div className="grid-chat">
         <div>
           <div className="card section-gap">
             <div className="card-header">
-              <span className="card-title">Email Audit — Inbound · {PERIOD_LABELS[period]} (oldest first)</span>
+              <span className="card-title">
+                Email Audit — Inbound · {rangeLabelStr} (oldest first)
+                <DataSourceTooltip
+                  source="Gmail inbox via /api/emails (latest 250)"
+                  filters={[
+                    "Received date within selected range",
+                    search.trim() ? `Search: "${search.trim()}"` : "No search filter",
+                    "Sorted by age (oldest first), paginated 25/page",
+                  ]}
+                  time="range"
+                />
+              </span>
               <input
                 type="search"
                 placeholder="Search sender, subject, label…"
@@ -180,7 +213,7 @@ export default function EmailsPage() {
                     ? "Inbox empty."
                     : search.trim()
                       ? "No matches for your search."
-                      : `No emails in ${PERIOD_LABELS[period]}.`}
+                      : `No emails in ${rangeLabelStr}.`}
                 </div>
               ) : (
                 <table className="data-table">

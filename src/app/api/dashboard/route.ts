@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { hcpFetchAll, hcpFetchSince, hcpJobLineItems } from "@/lib/hcp";
+import { hcpFetch, hcpFetchAll, hcpFetchJobsScheduled, hcpFetchSince, hcpJobLineItems } from "@/lib/hcp";
 import {
   buildMaterialJob,
   computeAging,
@@ -7,22 +7,28 @@ import {
   computeCashFlow,
   computeContractors,
   computeCustomerStats,
+  computeConversion,
   computeFireItems,
+  computeGrossMargin,
   computeKPIs,
   computeRouteClusters,
+  countJobsCreated,
+  defaultRange,
   isLucasJob,
-  jobCompletedDate,
+  jobScheduledDate,
   normalizeCustomer,
   normalizeEstimate,
   normalizeInvoice,
   normalizeJob,
-  PERIOD_LABELS,
-  periodStart,
+  rangeEndExclusive,
+  rangeLabel,
+  rangeStart,
+  sumJobRevenue,
   summarizeMaterials,
 } from "@/lib/normalize";
-import type { DashboardData, MaterialJob, Period } from "@/lib/types";
+import type { DashboardData, DateRange, MaterialJob } from "@/lib/types";
 
-const VALID_PERIODS: Period[] = ["wtd", "mtd", "qtd", "ytd"];
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 export const dynamic = "force-dynamic";
 
@@ -41,27 +47,57 @@ export async function GET(req: Request) {
   const errors: Record<string, string> = {};
 
   const url = new URL(req.url);
-  const periodParam = (url.searchParams.get("period") || "mtd").toLowerCase() as Period;
-  const period: Period = VALID_PERIODS.includes(periodParam) ? periodParam : "mtd";
   const now = new Date();
-  const start = periodStart(period, now);
+  const def = defaultRange(now);
+  const startParam = url.searchParams.get("start");
+  const endParam = url.searchParams.get("end");
+  let range: DateRange = {
+    start: startParam && ISO_DATE.test(startParam) ? startParam : def.start,
+    end: endParam && ISO_DATE.test(endParam) ? endParam : def.end,
+  };
+  // Swap if inverted so the window is always valid.
+  if (range.start > range.end) range = { start: range.end, end: range.start };
+
+  const start = rangeStart(range.start);
   const startISO = start.toISOString();
-  // YTD/QTD can span many pages; bound by period so MTD/WTD stay fast.
-  const jobPageLimit = period === "ytd" ? 50 : period === "qtd" ? 25 : 6;
+  const endISO = rangeEndExclusive(range.end).toISOString();
+  // Wider spans cross more job pages; scale the page cap by range length so short ranges stay fast.
+  const spanDays = Math.max(1, Math.round((rangeEndExclusive(range.end).getTime() - start.getTime()) / 86400000));
+  const jobPageLimit = spanDays > 270 ? 50 : spanDays > 90 ? 25 : spanDays > 31 ? 12 : 6;
 
   const estCreated = (e: AnyRec): string | null =>
     (e.created_at as string) || (e.created as string) || null;
+  const jobCreated = (j: AnyRec): string | null =>
+    (j.created_at as string) || (j.created as string) || null;
 
-  const [jobsRaw, estimatesRaw, invoicesRaw, customersRaw] = await Promise.all([
-    // Period KPIs count jobs by completed_at; page newest-first and stop once past the window.
-    safe("jobs", () => hcpFetchSince<AnyRec>("/jobs", "jobs", startISO, jobCompletedDate, 100, jobPageLimit), [], errors),
+  const [jobsRaw, estimatesRaw, invoicesRaw, customersRaw, revenueJobsRaw, createdJobsRaw] = await Promise.all([
+    // Job revenue earned windows by the Scheduled date (matches HCP's report); page
+    // newest-first and stop once past the window.
+    safe("jobs", () => hcpFetchSince<AnyRec>("/jobs", "jobs", startISO, jobScheduledDate, 100, jobPageLimit), [], errors),
     safe("estimates", () => hcpFetchSince<AnyRec>("/estimates", "estimates", startISO, estCreated, 100, jobPageLimit), [], errors),
-    // AR/aging is all-time outstanding, not period-scoped.
-    safe("invoices", () => hcpFetchAll<AnyRec>("/invoices", "invoices", 100, 10), [], errors),
+    // AR = open (unpaid) invoices, server-side filtered by status. All-time, not period-scoped.
+    safe("invoices", () => hcpFetchAll<AnyRec>("/invoices", "invoices", 100, 10, { "status[]": "open" }), [], errors),
     safe("customers", () => hcpFetchAll<AnyRec>("/customers", "customers", 100, 5), [], errors),
+    // Exact "Job revenue earned" set: HCP server-side filters jobs by scheduled date in
+    // range + work_status completed. Summing subtotal over this matches the HCP report.
+    safe(
+      "revenue_jobs",
+      () => hcpFetchJobsScheduled<AnyRec>(range.start, range.end, ["completed"], 100, 50),
+      [],
+      errors,
+    ),
+    // "Job count" report windows by CREATED date (no HCP server-side created filter exists,
+    // so page newest-first by created_at and stop past the window, then filter client-side).
+    safe("created_jobs", () => hcpFetchSince<AnyRec>("/jobs", "jobs", startISO, jobCreated, 100, jobPageLimit), [], errors),
   ]);
 
   const jobs = jobsRaw.map(normalizeJob);
+  // Precise job-revenue figures (subtotal basis) from the server-side filtered set.
+  const revenueJobs = revenueJobsRaw.map(normalizeJob);
+  const periodRevenueOverride = sumJobRevenue(revenueJobs);
+  const periodJobsOverride = revenueJobs.length;
+  // Job count: created-in-range, non-canceled (HCP "Job count" report).
+  const jobsCreatedCountOverride = countJobsCreated(createdJobsRaw.map(normalizeJob), range);
   const estimates = estimatesRaw.map(normalizeEstimate);
   const customers = customersRaw.map(normalizeCustomer);
 
@@ -81,14 +117,47 @@ export async function GET(req: Request) {
     const svc = jobs[idx]?.service;
     if (svc) jobServiceMap.set(id, svc);
   });
-  const allInvoices = invoicesRaw.map((r) => normalizeInvoice(r, jobCustomerMap, jobServiceMap));
-
-  const paidStatuses = new Set(["paid", "voided", "void", "refunded"]);
-  const ar = allInvoices.filter((inv) => !paidStatuses.has(inv.status) && inv.total > 0);
+  // invoicesRaw is already server-side filtered to status=open (the AR set).
+  // Resolve the Job # for each open invoice by fetching its job (the AR table shows it).
+  // job.invoice_number is the closest job identifier HCP exposes via the API.
+  const arJobIds = Array.from(
+    new Set(invoicesRaw.map((r) => (r as AnyRec).job_id as string | undefined).filter((x): x is string => !!x)),
+  );
+  const jobNumberMap = new Map<string, string>();
+  await Promise.all(
+    arJobIds.map(async (jid) => {
+      try {
+        const j = await hcpFetch<AnyRec>(`/jobs/${jid}`);
+        const raw = j.invoice_number ?? j.job_number ?? j.number;
+        const num = raw != null ? String(raw) : "";
+        if (num) jobNumberMap.set(jid, num);
+      } catch {
+        // leave blank on failure
+      }
+    }),
+  );
+  const ar = invoicesRaw.map((r) => normalizeInvoice(r, jobCustomerMap, jobServiceMap, jobNumberMap));
 
   const aging = computeAging(ar);
   const agingTotal = aging.current + aging.days_1_30 + aging.days_31_60 + aging.days_61_90 + aging.days_90_plus;
-  const kpis = computeKPIs({ jobs, estimates, ar, agingTotal, period, now });
+
+  // Gross profit margin: pull line items for the revenue set (scheduled-in-range + completed)
+  // and compute (revenue - cost)/revenue over non-tax lines — matches HCP's report.
+  const revenueItemSets = await Promise.all(
+    revenueJobs.map(async (j) => {
+      try {
+        return await hcpJobLineItems(j.id);
+      } catch (e) {
+        errors[`margin_items_${j.id}`] = e instanceof Error ? e.message : String(e);
+        return [];
+      }
+    }),
+  );
+  const grossMarginOverride = computeGrossMargin(revenueItemSets);
+  // Estimate conversion: estimates are fetched created-windowed, so compute directly.
+  const conversionOverride = computeConversion(estimates, range);
+
+  const kpis = computeKPIs({ jobs, estimates, ar, agingTotal, range, now, periodRevenueOverride, periodJobsOverride, jobsCreatedCountOverride, grossMarginOverride, conversionOverride });
   const fireItems = computeFireItems({ ar, jobs, estimates });
   const contractors = computeContractors(jobsRaw, jobs, estimatesRaw, estimates);
   const customerStats = computeCustomerStats(jobs, estimates);
@@ -136,9 +205,10 @@ export async function GET(req: Request) {
     materialJobs,
     lucasMaterialSummary,
     fetchedAt: now.toISOString(),
-    period,
-    periodLabel: PERIOD_LABELS[period],
+    range,
+    periodLabel: rangeLabel(range),
     periodStart: startISO,
+    periodEnd: endISO,
     errors: Object.keys(errors).length ? errors : undefined,
   };
 

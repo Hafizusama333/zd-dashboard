@@ -1,6 +1,7 @@
 "use client";
 
 import ChatPanel from "@/components/ChatPanel";
+import DataSourceTooltip from "@/components/DataSourceTooltip";
 import { useDashboard } from "@/components/DashboardProvider";
 import { fmtDate, fmtMoney } from "@/lib/format";
 
@@ -23,6 +24,18 @@ export default function MaterialsPage() {
 
       <div className="grid-chat">
         <div>
+          <div className="section-head section-gap">
+            <span className="section-head-label">Material / Margin Metrics</span>
+            <DataSourceTooltip
+              source="HousecallPro /jobs line items via /api/dashboard"
+              filters={[
+                "Lucas's jobs from the in-range job set, most recent first (limit 30)",
+                "Margin = labor price − labor cost from HCP line items",
+                "Receipts/attachments not exposed by HCP REST API",
+              ]}
+              time="range"
+            />
+          </div>
           <div className="kpi-grid section-gap">
             <KPI label="Lucas Jobs Tracked" value={summary ? String(summary.jobCount) : "—"} meta="Most recent first" />
             <KPI label="Total Labor Cost" value={fmtMoney(summary?.totalLaborCost ?? 0)} valueClass="down" meta="From HCP line items" />
@@ -37,7 +50,17 @@ export default function MaterialsPage() {
 
           <div className="card section-gap">
             <div className="card-header">
-              <span className="card-title">Lucas&apos;s Recent Jobs — Line Items</span>
+              <span className="card-title">
+                Lucas&apos;s Recent Jobs — Line Items
+                <DataSourceTooltip
+                  source="HousecallPro /jobs line items via /api/dashboard"
+                  filters={[
+                    "Lucas's jobs (in-range set), sorted by completed date desc",
+                    "Labor cost vs price per job; limit 30",
+                  ]}
+                  time="range"
+                />
+              </span>
               <span style={{ fontSize: 11, color: "var(--text-2)" }}>{sorted.length} jobs</span>
             </div>
             <div className="table-scroll" style={{ padding: 0 }}>
@@ -77,6 +100,11 @@ export default function MaterialsPage() {
               <div className="card-header">
                 <span className="card-title">
                   Job #{j.number} — {j.customer}
+                  <DataSourceTooltip
+                    source={`HousecallPro /jobs/${j.jobId}/line_items`}
+                    filters={["All line items for this job (labor, material, tax)"]}
+                    time={j.completedAt ? `Completed ${fmtDate(j.completedAt)}` : "—"}
+                  />
                 </span>
                 <span style={{ fontSize: 11, color: "var(--text-2)" }}>{fmtDate(j.completedAt)}</span>
               </div>

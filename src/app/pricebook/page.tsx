@@ -1,6 +1,7 @@
 "use client";
 
 import ChatPanel from "@/components/ChatPanel";
+import DataSourceTooltip from "@/components/DataSourceTooltip";
 import { useDashboard } from "@/components/DashboardProvider";
 import { fmtMoney } from "@/lib/format";
 
@@ -38,7 +39,17 @@ export default function PriceBookPage() {
         <div>
           <div className="card section-gap">
             <div className="card-header">
-              <span className="card-title">Historical Price Baseline — Built from Completed Jobs</span>
+              <span className="card-title">
+                Historical Price Baseline — Built from Completed Jobs
+                <DataSourceTooltip
+                  source="HousecallPro /jobs via /api/dashboard"
+                  filters={[
+                    "Completed jobs in range, grouped by service",
+                    "avg / min / max of totals; Est Margin% is a static assumption per service",
+                  ]}
+                  time="range"
+                />
+              </span>
               <button className="action-btn primary">Build New Price Book →</button>
             </div>
             <div className="table-scroll" style={{ padding: 0 }}>
@@ -76,7 +87,14 @@ export default function PriceBookPage() {
 
           <div className="card section-gap">
             <div className="card-header">
-              <span className="card-title">Tiered Pricing Example — Shower Diverter Repair</span>
+              <span className="card-title">
+                Tiered Pricing Example — Shower Diverter Repair
+                <DataSourceTooltip
+                  source="Static example (hardcoded), not live HCP data"
+                  filters={["Illustrative tier template"]}
+                  time="—"
+                />
+              </span>
               <span className="card-action">Add to price book →</span>
             </div>
             <div className="card-body">
@@ -111,7 +129,14 @@ export default function PriceBookPage() {
 
           <div className="card">
             <div className="card-header">
-              <span className="card-title">Price Book — All Line Items</span>
+              <span className="card-title">
+                Price Book — All Line Items
+                <DataSourceTooltip
+                  source="Static seed list (hardcoded), not live HCP data"
+                  filters={["Manually maintained line items"]}
+                  time="—"
+                />
+              </span>
               <button className="action-btn">+ Add Item</button>
             </div>
             <div className="table-scroll" style={{ padding: 0 }}>

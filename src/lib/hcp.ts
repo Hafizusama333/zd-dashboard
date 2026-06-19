@@ -83,6 +83,45 @@ export async function hcpFetchSince<T = unknown>(
   return all;
 }
 
+// Jobs whose SCHEDULED date falls in [minDate, maxDate] with the given work statuses,
+// using HCP's server-side filters. This is exactly how the "Job revenue earned" report
+// scopes jobs, so summing subtotal over the result matches the report figure.
+// Dates are YYYY-MM-DD (inclusive on both ends, per HCP).
+export async function hcpFetchJobsScheduled<T = unknown>(
+  minDate: string,
+  maxDate: string,
+  workStatuses: string[],
+  pageSize = 100,
+  pageLimit = 50,
+): Promise<T[]> {
+  if (!KEY) throw new Error("HCP_API_KEY missing");
+  const all: T[] = [];
+  for (let page = 1; page <= pageLimit; page++) {
+    const url = new URL(`${BASE}/jobs`);
+    url.searchParams.set("page", String(page));
+    url.searchParams.set("page_size", String(pageSize));
+    url.searchParams.set("scheduled_start_min", minDate);
+    url.searchParams.set("scheduled_start_max", maxDate);
+    // work_status is a repeated array param: work_status[]=completed
+    for (const ws of workStatuses) url.searchParams.append("work_status[]", ws);
+
+    const res = await fetch(url.toString(), {
+      headers: { Authorization: `Token ${KEY}`, Accept: "application/json" },
+      cache: "no-store",
+    });
+    if (!res.ok) {
+      const text = await res.text().catch(() => "");
+      throw new Error(`HCP ${res.status} on /jobs (scheduled): ${text.slice(0, 200)}`);
+    }
+    const data = (await res.json()) as Record<string, unknown>;
+    const arr = (data.jobs as T[] | undefined) || [];
+    all.push(...arr);
+    const totalPages = Number(data.total_pages) || 1;
+    if (arr.length < pageSize || page >= totalPages) break;
+  }
+  return all;
+}
+
 export type HCPLineItem = {
   id: string;
   name: string;

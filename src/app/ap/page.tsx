@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import ChatPanel from "@/components/ChatPanel";
+import DataSourceTooltip from "@/components/DataSourceTooltip";
 import { useDashboard } from "@/components/DashboardProvider";
-import { periodStart, PERIOD_LABELS } from "@/lib/normalize";
+import { rangeStart, rangeEndExclusive } from "@/lib/normalize";
 
 type APRow = {
   rowNumber: number;
@@ -42,7 +43,7 @@ function parseAmount(amount: string): number {
 }
 
 function fmtMoney(n: number): string {
-  return "$" + n.toLocaleString("en-US", { maximumFractionDigits: 0 });
+  return "$" + n.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 }
 
 // Submission timestamps look like "11/15/2024 8:25:34" (M/D/YYYY). Parse to a
@@ -72,8 +73,14 @@ export default function APPage() {
   const [error, setError] = useState<string | null>(null);
   const [search, setSearch] = useState("");
   const [page, setPage] = useState(1);
-  const { period } = useDashboard();
+  // Unit-cost lookup (address -> newest job's unit price). Loaded in a second pass.
+  const [costs, setCosts] = useState<Record<string, number | null>>({});
+  const [completed, setCompleted] = useState<Record<string, boolean | null>>({});
+  const [costsLoading, setCostsLoading] = useState(true);
+  const { range, data: dashData } = useDashboard();
+  const rangeLabelStr = dashData?.periodLabel ?? "selected range";
 
+  // Phase 1: load AP rows from n8n (fast) and render immediately.
   useEffect(() => {
     let alive = true;
     fetch("/api/ap")
@@ -90,16 +97,51 @@ export default function APPage() {
     };
   }, []);
 
-  // Filter by the global time period (WTD/MTD/QTD/YTD from the Topbar). Rows
-  // whose submission date is on/after the period start are kept; rows with no
-  // parseable date are dropped from period-scoped views.
+  // Phase 2: once rows are in, fetch unit costs (HCP job line items) in the background.
+  // Cells show an inline loader until this resolves. Keyed by rowNumber so each row's
+  // cost is matched independently (WO# first, else newest job at the address).
+  useEffect(() => {
+    if (rows.length === 0) return;
+    let alive = true;
+    const items = rows
+      .filter((r) => r.address || r.wo)
+      .map((r) => ({ key: String(r.rowNumber), address: r.address, wo: r.wo }));
+    if (items.length === 0) {
+      setCostsLoading(false);
+      return;
+    }
+    setCostsLoading(true);
+    fetch("/api/ap/costs", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ items }),
+    })
+      .then((r) => r.json())
+      .then((data) => {
+        if (!alive) return;
+        setCosts(data.costs && typeof data.costs === "object" ? data.costs : {});
+        setCompleted(data.completed && typeof data.completed === "object" ? data.completed : {});
+      })
+      .catch(() => {})
+      .finally(() => alive && setCostsLoading(false));
+    return () => {
+      alive = false;
+    };
+  }, [rows]);
+
+  // Filter by the global date range (from the Topbar). Rows whose submission date
+  // falls within [start, end] inclusive are kept; rows with no parseable date are
+  // dropped from range-scoped views.
   const periodRows = useMemo(() => {
-    const start = periodStart(period).getTime();
+    const start = rangeStart(range.start).getTime();
+    const end = rangeEndExclusive(range.end).getTime();
     return rows.filter((r) => {
       const d = parseSubmitted(r.submitted);
-      return d !== null && d.getTime() >= start;
+      if (d === null) return false;
+      const t = d.getTime();
+      return t >= start && t < end;
     });
-  }, [rows, period]);
+  }, [rows, range]);
 
   const kpis = useMemo(() => {
     let total = 0;
@@ -138,11 +180,12 @@ export default function APPage() {
     );
   }, [periodRows, search]);
 
-  // Reset to first page when the search term or period changes — adjust during
+  // Reset to first page when the search term or range changes — adjust during
   // render instead of in an effect to avoid a cascading re-render.
-  const [prevKey, setPrevKey] = useState(search + "|" + period);
-  if (search + "|" + period !== prevKey) {
-    setPrevKey(search + "|" + period);
+  const rangeKey = range.start + ".." + range.end;
+  const [prevKey, setPrevKey] = useState(search + "|" + rangeKey);
+  if (search + "|" + rangeKey !== prevKey) {
+    setPrevKey(search + "|" + rangeKey);
     setPage(1);
   }
 
@@ -157,7 +200,19 @@ export default function APPage() {
     <div className="page">
       <div className="grid-chat">
         <div>
-          <div className="kpi-grid section-gap">
+          <div className="section-head section-gap">
+            <span className="section-head-label">AP Metrics</span>
+            <DataSourceTooltip
+              source="n8n sheet via /api/ap"
+              filters={[
+                "Submission date parsed (M/D/YYYY) and filtered to selected range",
+                "Rows with no parseable date excluded",
+                "Sums parse leading $ amounts; non-numeric rows count as 0",
+              ]}
+              time="range"
+            />
+          </div>
+          <div className="kpi-grid">
             <KPI
               label="Total Submitted"
               value={fmtMoney(kpis.total)}
@@ -165,17 +220,23 @@ export default function APPage() {
             />
             <KPI label="Paid" value={fmtMoney(kpis.paidSum)} valueClass="up" meta={`${kpis.count} submissions`} />
             <KPI label="Unpaid" value={fmtMoney(kpis.unpaidSum)} valueClass="warn" meta="Awaiting payment" />
-            <KPI
-              label="Missing Pics"
-              value={String(kpis.missingPics)}
-              valueClass={kpis.missingPics > 0 ? "down" : "up"}
-              meta="No photos sent"
-            />
           </div>
 
           <div className="card section-gap">
             <div className="card-header">
-              <span className="card-title">Contractor AP Submissions — {PERIOD_LABELS[period]}</span>
+              <span className="card-title">
+                Contractor AP Submissions — {rangeLabelStr}
+                <DataSourceTooltip
+                  source="n8n sheet via /api/ap; unit cost + completion from HousecallPro /jobs line items via /api/ap/costs"
+                  filters={[
+                    "Submission date within selected range",
+                    search.trim() ? `Search: "${search.trim()}"` : "No search filter",
+                    "Unit cost matched by WO#, else newest job at address",
+                    `Paginated, ${PAGE_SIZE}/page`,
+                  ]}
+                  time="range"
+                />
+              </span>
               <input
                 className="ap-search"
                 type="search"
@@ -192,6 +253,12 @@ export default function APPage() {
                 }}
               />
             </div>
+            {costsLoading && (
+              <div className="ap-cost-banner">
+                <span className="cell-spinner" aria-label="Loading" />
+                Matching jobs and fetching unit costs from HousecallPro…
+              </div>
+            )}
             <div className="table-scroll" style={{ padding: 0 }}>
               {loading ? (
                 <div style={{ padding: 24, color: "var(--text-2)" }}>Loading submissions…</div>
@@ -205,16 +272,17 @@ export default function APPage() {
                     ? "No submissions found."
                     : search.trim()
                       ? "No matches for your search."
-                      : `No submissions in ${PERIOD_LABELS[period]}.`}
+                      : `No submissions in ${rangeLabelStr}.`}
                 </div>
               ) : (
                 <table className="data-table">
                   <thead>
                     <tr>
                       <th>Contractor</th>
-                      <th>WO #</th>
                       <th>Address</th>
-                      <th>Price</th>
+                      <th>Invoice submission cost</th>
+                      <th>Unit cost</th>
+                      <th>Completed</th>
                       <th>Pics</th>
                       <th>Submitted</th>
                       <th>Status</th>
@@ -229,9 +297,32 @@ export default function APPage() {
                             {r.contractor || "—"}
                           </div>
                         </td>
-                        <td className="mono">{r.wo || "—"}</td>
                         <td>{r.address || "—"}</td>
                         <td className="mono">{fmtPrice(r.amount)}</td>
+                        <td className="mono">
+                          {String(r.rowNumber) in costs ? (
+                            costs[String(r.rowNumber)] != null ? fmtMoney(costs[String(r.rowNumber)]!) : "—"
+                          ) : costsLoading ? (
+                            <span className="cell-loading"><span className="cell-spinner" aria-label="Loading" />Loading…</span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
+                        <td>
+                          {String(r.rowNumber) in completed ? (
+                            completed[String(r.rowNumber)] == null ? (
+                              <span className="badge badge-gray">No job</span>
+                            ) : completed[String(r.rowNumber)] ? (
+                              <span className="badge badge-green">Completed</span>
+                            ) : (
+                              <span className="badge badge-amber">Not completed</span>
+                            )
+                          ) : costsLoading ? (
+                            <span className="cell-loading"><span className="cell-spinner" aria-label="Loading" />Loading…</span>
+                          ) : (
+                            "—"
+                          )}
+                        </td>
                         <td>
                           <span className={`badge ${r.picsSent ? "badge-green" : "badge-red"}`}>
                             {r.picsSent ? "Yes" : "Missing"}
