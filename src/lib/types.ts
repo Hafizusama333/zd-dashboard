@@ -26,6 +26,8 @@ export type Estimate = {
   status: string;
   total: number;
   service: string;
+  address: string; // service address (street, city, state)
+  zip: string; // service address ZIP
   created: string | null;
   updated: string | null;
   daysSinceSent: number;
@@ -41,6 +43,8 @@ export type Invoice = {
   number: string;
   jobNumber: string;
   customer: string;
+  address: string; // service address (street, city, state) from linked job
+  zip: string; // service address ZIP from linked job
   amount: number; // invoice amount
   total: number; // amount due (outstanding)
   due: string | null;

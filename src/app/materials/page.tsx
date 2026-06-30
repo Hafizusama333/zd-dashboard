@@ -108,7 +108,7 @@ export default function MaterialsPage() {
                 </span>
                 <span style={{ fontSize: 11, color: "var(--text-2)" }}>{fmtDate(j.completedAt)}</span>
               </div>
-              <div style={{ padding: 0 }}>
+              <div className="table-scroll" style={{ padding: 0 }}>
                 <table className="data-table">
                   <thead>
                     <tr>

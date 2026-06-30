@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { hcpFetch, hcpFetchAll, hcpFetchJobsScheduled, hcpFetchSince, hcpJobLineItems } from "@/lib/hcp";
+import { hcpFetch, hcpFetchAll, hcpFetchJobsScheduled, hcpFetchSince, hcpJobLineItems, mapPool } from "@/lib/hcp";
 import {
   buildMaterialJob,
   computeAging,
@@ -103,6 +103,8 @@ export async function GET(req: Request) {
 
   const jobCustomerMap = new Map<string, string>();
   const jobServiceMap = new Map<string, string>();
+  const jobAddressMap = new Map<string, string>();
+  const jobZipMap = new Map<string, string>();
   jobsRaw.forEach((j, idx) => {
     const id = (j as AnyRec).id as string | undefined;
     if (!id) return;
@@ -116,6 +118,11 @@ export async function GET(req: Request) {
     }
     const svc = jobs[idx]?.service;
     if (svc) jobServiceMap.set(id, svc);
+    // Service address + ZIP for AR table.
+    const addr = jobs[idx]?.address;
+    const zip = jobs[idx]?.zip;
+    if (addr && addr !== "—") jobAddressMap.set(id, addr);
+    if (zip) jobZipMap.set(id, zip);
   });
   // invoicesRaw is already server-side filtered to status=open (the AR set).
   // Resolve the Job # for each open invoice by fetching its job (the AR table shows it).
@@ -124,35 +131,37 @@ export async function GET(req: Request) {
     new Set(invoicesRaw.map((r) => (r as AnyRec).job_id as string | undefined).filter((x): x is string => !!x)),
   );
   const jobNumberMap = new Map<string, string>();
-  await Promise.all(
-    arJobIds.map(async (jid) => {
-      try {
-        const j = await hcpFetch<AnyRec>(`/jobs/${jid}`);
-        const raw = j.invoice_number ?? j.job_number ?? j.number;
-        const num = raw != null ? String(raw) : "";
-        if (num) jobNumberMap.set(jid, num);
-      } catch {
-        // leave blank on failure
-      }
-    }),
-  );
-  const ar = invoicesRaw.map((r) => normalizeInvoice(r, jobCustomerMap, jobServiceMap, jobNumberMap));
+  // Throttled (mapPool) so we don't fire ~100 parallel /jobs requests and hit HCP 429.
+  await mapPool(arJobIds, 4, async (jid) => {
+    try {
+      const j = await hcpFetch<AnyRec>(`/jobs/${jid}`);
+      const raw = j.invoice_number ?? j.job_number ?? j.number;
+      const num = raw != null ? String(raw) : "";
+      if (num) jobNumberMap.set(jid, num);
+      // Service address (with ZIP) from the invoice's own job — covers all-time AR,
+      // not just the in-window jobs already in jobAddressMap.
+      const nj = normalizeJob(j);
+      if (nj.address && nj.address !== "—") jobAddressMap.set(jid, nj.address);
+      if (nj.zip) jobZipMap.set(jid, nj.zip);
+    } catch {
+      // leave blank on failure
+    }
+  });
+  const ar = invoicesRaw.map((r) => normalizeInvoice(r, jobCustomerMap, jobServiceMap, jobNumberMap, jobAddressMap, jobZipMap));
 
   const aging = computeAging(ar);
   const agingTotal = aging.current + aging.days_1_30 + aging.days_31_60 + aging.days_61_90 + aging.days_90_plus;
 
   // Gross profit margin: pull line items for the revenue set (scheduled-in-range + completed)
   // and compute (revenue - cost)/revenue over non-tax lines — matches HCP's report.
-  const revenueItemSets = await Promise.all(
-    revenueJobs.map(async (j) => {
-      try {
-        return await hcpJobLineItems(j.id);
-      } catch (e) {
-        errors[`margin_items_${j.id}`] = e instanceof Error ? e.message : String(e);
-        return [];
-      }
-    }),
-  );
+  const revenueItemSets = await mapPool(revenueJobs, 4, async (j) => {
+    try {
+      return await hcpJobLineItems(j.id);
+    } catch (e) {
+      errors[`margin_items_${j.id}`] = e instanceof Error ? e.message : String(e);
+      return [];
+    }
+  });
   const grossMarginOverride = computeGrossMargin(revenueItemSets);
   // Estimate conversion: estimates are fetched created-windowed, so compute directly.
   const conversionOverride = computeConversion(estimates, range);
@@ -173,19 +182,17 @@ export async function GET(req: Request) {
   const MATERIAL_JOB_LIMIT = 30;
   const target = lucasIndices.slice(0, MATERIAL_JOB_LIMIT);
   const materialJobs: MaterialJob[] = (
-    await Promise.all(
-      target.map(async (i) => {
-        const j = jobsRaw[i];
-        const id = (j as AnyRec).id as string;
-        try {
-          const items = await hcpJobLineItems(id);
-          return buildMaterialJob(j, jobs[i], items);
-        } catch (e) {
-          errors[`line_items_${id}`] = e instanceof Error ? e.message : String(e);
-          return null;
-        }
-      }),
-    )
+    await mapPool(target, 4, async (i) => {
+      const j = jobsRaw[i];
+      const id = (j as AnyRec).id as string;
+      try {
+        const items = await hcpJobLineItems(id);
+        return buildMaterialJob(j, jobs[i], items);
+      } catch (e) {
+        errors[`line_items_${id}`] = e instanceof Error ? e.message : String(e);
+        return null;
+      }
+    })
   ).filter((x): x is MaterialJob => !!x);
   const lucasMaterialSummary = summarizeMaterials(materialJobs);
 

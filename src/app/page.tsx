@@ -202,7 +202,7 @@ export default function CommandCenter() {
             </span>
             <Link className="card-action" href="/contractors">Full report →</Link>
           </div>
-          <div style={{ padding: 0 }}>
+          <div className="table-scroll" style={{ padding: 0 }}>
             <table className="data-table">
               <thead>
                 <tr>

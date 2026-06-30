@@ -56,6 +56,13 @@ const customerName = (o: AnyRec | undefined): string => {
   return full || s(pick(o, "name"), "—");
 };
 
+// Jobs/dispatch + estimates: client wants ONLY the business company name. No company → "—"
+// (no person-name fallback, unlike customerName used for AR).
+const companyOnlyName = (o: AnyRec | undefined): string => {
+  if (!o) return "—";
+  return s(pick(o, "company"), "—");
+};
+
 const addressLine = (o: AnyRec | undefined): string => {
   if (!o) return "—";
   const parts = [
@@ -187,7 +194,7 @@ export function normalizeJob(raw: AnyRec): Job {
   return {
     id: s(pick(raw, "id", "uuid")),
     number: s(pick(raw, "invoice_number", "job_number", "number", "id")),
-    customer: customerName(customer),
+    customer: companyOnlyName(customer),
     address: addressLine(address),
     status,
     tech,
@@ -230,6 +237,7 @@ export function countJobsCreated(jobs: Job[], range: DateRange): number {
 
 export function normalizeEstimate(raw: AnyRec): Estimate {
   const customer = pick<AnyRec>(raw, "customer") || {};
+  const address = pick<AnyRec>(raw, "address", "service_address") || {};
   const options = pick<AnyRec[]>(raw, "options") || [];
   const optTotal = options.reduce(
     (acc, opt) => acc + money(pick(opt, "total_amount", "total")),
@@ -249,10 +257,12 @@ export function normalizeEstimate(raw: AnyRec): Estimate {
   return {
     id: s(pick(raw, "id", "uuid")),
     number: s(pick(raw, "estimate_number", "number", "id")),
-    customer: customerName(customer),
+    customer: companyOnlyName(customer),
     status,
     total,
     service: guessService(description),
+    address: addressLine(address),
+    zip: zipOf(address),
     created,
     updated: (pick(raw, "updated_at", "updated") as string) || null,
     daysSinceSent,
@@ -310,6 +320,8 @@ export function normalizeInvoice(
   jobCustomerMap?: Map<string, string>,
   jobServiceMap?: Map<string, string>,
   jobNumberMap?: Map<string, string>,
+  jobAddressMap?: Map<string, string>,
+  jobZipMap?: Map<string, string>,
 ): Invoice {
   const customer = pick<AnyRec>(raw, "customer") || {};
   const jobId = s(pick(raw, "job_id"));
@@ -320,6 +332,13 @@ export function normalizeInvoice(
   const linkedCustomer = jobId && jobCustomerMap ? jobCustomerMap.get(jobId) : undefined;
   const linkedService = jobId && jobServiceMap ? jobServiceMap.get(jobId) : undefined;
   const jobNumber = jobId && jobNumberMap ? jobNumberMap.get(jobId) || "" : "";
+  // Invoice raw has no service address; fall back to its own address, then the linked job's.
+  const ownAddr = addressLine(pick<AnyRec>(raw, "address", "service_address"));
+  const ownZip = zipOf(pick<AnyRec>(raw, "address", "service_address"));
+  const linkedAddress = jobId && jobAddressMap ? jobAddressMap.get(jobId) : undefined;
+  const linkedZip = jobId && jobZipMap ? jobZipMap.get(jobId) : undefined;
+  const address = linkedAddress || (ownAddr !== "—" ? ownAddr : "—");
+  const zip = linkedZip || ownZip || "";
   const created = (pick(raw, "invoice_date", "created_at", "created") as string) || null;
   const daysOut = created
     ? Math.max(0, Math.floor((Date.now() - new Date(created).getTime()) / 86400000))
@@ -329,6 +348,8 @@ export function normalizeInvoice(
     number: s(pick(raw, "invoice_number", "number", "id")),
     jobNumber,
     customer: linkedCustomer || customerName(customer),
+    address,
+    zip,
     amount: money(pick(raw, "amount", "total_amount", "total")),
     total: money(pick(raw, "due_amount", "amount_due", "balance_due", "amount", "total_amount", "total")),
     due,

@@ -25,13 +25,24 @@ export default function EstimatesPage() {
   const estimates = data?.estimates ?? [];
   const baselines = data?.baselines ?? [];
 
+  // This pricing screen is fixed to the last 7 days, independent of the dashboard's
+  // selected range. The HCP fetch over-pulls (200+ newest estimates), so the 7-day
+  // window is always fully covered regardless of the global range.
+  const sevenDayStart = Date.now() - 7 * 86400000;
+  const createdInRange = (created: string | null): boolean => {
+    if (!created) return false;
+    const t = new Date(created).getTime();
+    if (!Number.isFinite(t)) return false;
+    return t >= sevenDayStart;
+  };
+
   // Client priority: unscheduled (not attended) and completed (visited, need invoice).
   // Oldest first so the longest-standing rise to the top.
   const unscheduled = estimates
-    .filter((e) => e.bucket === "unscheduled")
+    .filter((e) => e.bucket === "unscheduled" && createdInRange(e.created))
     .sort((a, b) => b.hoursWaiting - a.hoursWaiting);
   const completedNeedInvoice = estimates
-    .filter((e) => e.bucket === "completed")
+    .filter((e) => e.bucket === "completed" && createdInRange(e.created))
     .sort((a, b) => b.hoursWaiting - a.hoursWaiting);
 
   const unscheduledStale = unscheduled.filter((e) => e.hoursWaiting >= 72).length;
@@ -46,11 +57,11 @@ export default function EstimatesPage() {
             <DataSourceTooltip
               source="HousecallPro /estimates via /api/dashboard"
               filters={[
-                "Estimates created in range (paged newest-first by created_at)",
+                "Estimates created in the last 7 days (paged newest-first by created_at)",
                 "Bucketed: unscheduled (not attended) vs completed (need invoice)",
                 "Conversion: created-in-range estimates that became jobs",
               ]}
-              time="range"
+              time="Last 7 days"
             />
           </div>
           <div className="kpi-grid">
@@ -85,10 +96,11 @@ export default function EstimatesPage() {
                   source="HousecallPro /estimates via /api/dashboard"
                   filters={[
                     "bucket = unscheduled (not yet attended)",
+                    "Created in the last 7 days",
                     "Sorted by hours waiting (desc), first 30",
                     "AI price check vs service baselines",
                   ]}
-                  time="range"
+                  time="Last 7 days"
                 />
               </span>
               <span className="badge badge-red">Oldest first</span>
@@ -97,12 +109,12 @@ export default function EstimatesPage() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>EST #</th><th>Customer</th><th>Service</th><th>Amount</th><th>Waiting</th><th>AI Price Check</th>
+                    <th>EST #</th><th>Customer</th><th>Service</th><th>Address</th><th>ZIP</th><th>Amount</th><th>Waiting</th><th>AI Price Check</th>
                   </tr>
                 </thead>
                 <tbody>
                   {unscheduled.length === 0 ? (
-                    <tr><td colSpan={6} className="empty">{data ? "Nothing unscheduled" : "Loading..."}</td></tr>
+                    <tr><td colSpan={8} className="empty">{data ? "Nothing unscheduled" : "Loading..."}</td></tr>
                   ) : (
                     unscheduled.slice(0, 30).map((e) => {
                       const pc = priceCheck(e, baselines);
@@ -112,6 +124,8 @@ export default function EstimatesPage() {
                           <td className="mono">#{e.number}</td>
                           <td>{e.customer}</td>
                           <td>{e.service}</td>
+                          <td style={{ fontSize: 11, color: "var(--text-2)", maxWidth: 160 }}>{e.address}</td>
+                          <td className="mono">{e.zip || "—"}</td>
                           <td className="mono">{fmtMoney(e.total)}</td>
                           <td className="mono" style={{ color: stale ? "var(--red)" : "var(--amber)", fontWeight: stale ? 600 : 400 }}>
                             {fmtAge(e.hoursWaiting)}{stale ? " ⚠" : ""}
@@ -134,9 +148,10 @@ export default function EstimatesPage() {
                   source="HousecallPro /estimates via /api/dashboard"
                   filters={[
                     "bucket = completed (visited, not yet invoiced)",
+                    "Created in the last 7 days",
                     "Sorted by hours waiting (desc), first 30",
                   ]}
-                  time="range"
+                  time="Last 7 days"
                 />
               </span>
               <span style={{ fontSize: 11, color: "var(--text-2)" }}>Visited · ready to invoice</span>
@@ -145,12 +160,12 @@ export default function EstimatesPage() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>EST #</th><th>Customer</th><th>Service</th><th>Amount</th><th>Waiting</th><th>Action</th>
+                    <th>EST #</th><th>Customer</th><th>Service</th><th>Address</th><th>ZIP</th><th>Amount</th><th>Waiting</th>
                   </tr>
                 </thead>
                 <tbody>
                   {completedNeedInvoice.length === 0 ? (
-                    <tr><td colSpan={6} className="empty">{data ? "None awaiting invoice" : "Loading..."}</td></tr>
+                    <tr><td colSpan={7} className="empty">{data ? "None awaiting invoice" : "Loading..."}</td></tr>
                   ) : (
                     completedNeedInvoice.slice(0, 30).map((e) => {
                       const stale = e.hoursWaiting >= 72;
@@ -159,11 +174,12 @@ export default function EstimatesPage() {
                           <td className="mono">#{e.number}</td>
                           <td>{e.customer}</td>
                           <td>{e.service}</td>
+                          <td style={{ fontSize: 11, color: "var(--text-2)", maxWidth: 160 }}>{e.address}</td>
+                          <td className="mono">{e.zip || "—"}</td>
                           <td className="mono">{fmtMoney(e.total)}</td>
                           <td className="mono" style={{ color: stale ? "var(--red)" : "inherit", fontWeight: stale ? 600 : 400 }}>
                             {fmtAge(e.hoursWaiting)}{stale ? " ⚠" : ""}
                           </td>
-                          <td><button className="action-btn">Create invoice →</button></td>
                         </tr>
                       );
                     })
@@ -188,7 +204,7 @@ export default function EstimatesPage() {
               </span>
               <span style={{ fontSize: 11, color: "var(--text-2)" }}>Used by AI price check</span>
             </div>
-            <div style={{ padding: 0 }}>
+            <div className="table-scroll" style={{ padding: 0 }}>
               <table className="data-table">
                 <thead>
                   <tr><th>Service</th><th>Avg</th><th>Min</th><th>Max</th><th>Sample</th></tr>

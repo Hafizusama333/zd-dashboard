@@ -149,12 +149,12 @@ export default function ARPage() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Invoice #</th><th>Job #</th><th>Customer</th><th>Invoice amount</th><th>Amount due</th><th>Latest send date</th><th>Created date</th><th>Days out</th>
+                    <th>Invoice #</th><th>Job #</th><th>Customer</th><th>Address</th><th>ZIP</th><th>Invoice amount</th><th>Amount due</th><th>Latest send date</th><th>Created date</th><th>Days out</th>
                   </tr>
                 </thead>
                 <tbody>
                   {visible.length === 0 ? (
-                    <tr><td colSpan={8} className="empty">{data ? "No invoices match" : "Loading..."}</td></tr>
+                    <tr><td colSpan={10} className="empty">{data ? "No invoices match" : "Loading..."}</td></tr>
                   ) : (
                     grouped.slice(0, 50).map((inv) => {
                       const critical = inv.daysOverdue > 30;
@@ -163,6 +163,8 @@ export default function ARPage() {
                           <td className="mono">{inv.number}</td>
                           <td className="mono">{inv.jobNumber || "—"}</td>
                           <td><b>{inv.customer}</b></td>
+                          <td style={{ fontSize: 11, color: "var(--text-2)", maxWidth: 180 }}>{inv.address}</td>
+                          <td className="mono">{inv.zip || "—"}</td>
                           <td className="mono">{fmtMoney(inv.amount)}</td>
                           <td className="mono">{fmtMoney(inv.total)}</td>
                           <td>{fmtDateTime(inv.latestSendDate)}</td>

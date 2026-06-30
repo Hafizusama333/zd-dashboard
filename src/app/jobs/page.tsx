@@ -8,7 +8,7 @@ import StatusBadge from "@/components/StatusBadge";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import type { Job } from "@/lib/types";
 
-type Filter = "all" | "in_progress" | "needs_scheduling" | "scheduled";
+type Filter = "all" | "in_progress" | "needs_scheduling" | "scheduled" | "completed";
 
 const fmtAge = (hours: number): string =>
   hours <= 0 ? "—" : hours >= 48 ? `${Math.floor(hours / 24)}d` : `${Math.round(hours)}h`;
@@ -24,6 +24,7 @@ export default function JobsPage() {
     if (filter === "in_progress") return j.status === "in_progress";
     if (filter === "needs_scheduling") return j.status === "needs_scheduling";
     if (filter === "scheduled") return j.status === "scheduled";
+    if (filter === "completed") return j.status.startsWith("complete");
     return true;
   };
 
@@ -32,6 +33,7 @@ export default function JobsPage() {
     in_progress: jobs.filter((j) => j.status === "in_progress").length,
     needs_scheduling: jobs.filter((j) => j.status === "needs_scheduling").length,
     scheduled: jobs.filter((j) => j.status === "scheduled").length,
+    completed: jobs.filter((j) => j.status.startsWith("complete")).length,
   };
 
   const needsScheduling = jobs
@@ -39,7 +41,14 @@ export default function JobsPage() {
     .sort((a, b) => b.hoursUnscheduled - a.hoursUnscheduled)
     .slice(0, 15);
   const inProgress = jobs.filter((j) => j.status === "in_progress").slice(0, 10);
-  const filtered = jobs.filter(filterFn).slice(0, 50);
+  const filtered = jobs
+    .filter(filterFn)
+    .sort((a, b) =>
+      filter === "completed"
+        ? new Date(b.completedAt ?? 0).getTime() - new Date(a.completedAt ?? 0).getTime()
+        : 0,
+    )
+    .slice(0, 50);
 
   return (
     <div className="page">
@@ -50,6 +59,7 @@ export default function JobsPage() {
             <FTab on={filter === "in_progress"} onClick={() => setFilter("in_progress")}>In Progress ({counts.in_progress})</FTab>
             <FTab on={filter === "needs_scheduling"} onClick={() => setFilter("needs_scheduling")}>Needs Scheduling ({counts.needs_scheduling})</FTab>
             <FTab on={filter === "scheduled"} onClick={() => setFilter("scheduled")}>Scheduled ({counts.scheduled})</FTab>
+            <FTab on={filter === "completed"} onClick={() => setFilter("completed")}>Completed ({counts.completed})</FTab>
           </div>
 
           {filter === "all" && (
@@ -69,14 +79,14 @@ export default function JobsPage() {
                   </span>
                   <span className="badge badge-red">Urgent</span>
                 </div>
-                <div style={{ padding: 0 }}>
+                <div className="table-scroll" style={{ padding: 0 }}>
                   <table className="data-table">
                     <thead>
-                      <tr><th>WO #</th><th>Customer</th><th>Service</th><th>Address</th><th>Unscheduled For</th><th>Value</th><th>Contractor</th></tr>
+                      <tr><th>WO #</th><th>Customer</th><th>Service</th><th>Address</th><th>ZIP</th><th>Unscheduled For</th><th>Value</th><th>Contractor</th></tr>
                     </thead>
                     <tbody>
                       {needsScheduling.length === 0 ? (
-                        <tr><td colSpan={7} className="empty">{data ? "Nothing needs scheduling" : "Loading..."}</td></tr>
+                        <tr><td colSpan={8} className="empty">{data ? "Nothing needs scheduling" : "Loading..."}</td></tr>
                       ) : (
                         needsScheduling.map((j) => {
                           const stale = j.hoursUnscheduled >= 72;
@@ -86,6 +96,7 @@ export default function JobsPage() {
                             <td>{j.customer}</td>
                             <td>{j.service}</td>
                             <td style={{ fontSize: 11, color: "var(--text-2)" }}>{j.address}</td>
+                            <td className="mono">{j.zip || "—"}</td>
                             <td className="mono" style={{ color: stale ? "var(--red)" : "var(--amber)", fontWeight: stale ? 600 : 400 }}>
                               {fmtAge(j.hoursUnscheduled)}{stale ? " ⚠" : ""}
                             </td>
@@ -118,7 +129,7 @@ export default function JobsPage() {
                   </span>
                   <span style={{ fontSize: 11, color: "var(--text-2)" }}>{counts.in_progress} active</span>
                 </div>
-                <div style={{ padding: 0 }}>
+                <div className="table-scroll" style={{ padding: 0 }}>
                   <table className="data-table">
                     <thead>
                       <tr><th>WO #</th><th>Customer</th><th>Service</th><th>Scheduled</th><th>Contractor</th><th>Status</th></tr>
@@ -158,7 +169,7 @@ export default function JobsPage() {
                   </span>
                   <span style={{ fontSize: 11, color: "var(--text-2)" }}>By ZIP corridor</span>
                 </div>
-                <div className="card-body">
+                <div className="card-body table-scroll">
                   <p style={{ fontSize: 12, color: "var(--text-2)", marginBottom: 12 }}>
                     Open jobs grouped by ZIP. Highest-value corridors first.
                   </p>
@@ -206,11 +217,11 @@ export default function JobsPage() {
               <div className="table-scroll" style={{ padding: 0 }}>
                 <table className="data-table">
                   <thead>
-                    <tr><th>WO #</th><th>Customer</th><th>Service</th><th>Address</th><th>Status</th><th>Contractor</th><th>Scheduled</th><th>Value</th></tr>
+                    <tr><th>WO #</th><th>Customer</th><th>Service</th><th>Address</th><th>ZIP</th><th>Status</th><th>Contractor</th><th>Scheduled</th><th>Value</th></tr>
                   </thead>
                   <tbody>
                     {filtered.length === 0 ? (
-                      <tr><td colSpan={8} className="empty">No jobs match this filter</td></tr>
+                      <tr><td colSpan={9} className="empty">No jobs match this filter</td></tr>
                     ) : (
                       filtered.map((j) => (
                         <tr key={j.id}>
@@ -218,6 +229,7 @@ export default function JobsPage() {
                           <td>{j.customer}</td>
                           <td>{j.service}</td>
                           <td style={{ fontSize: 11, color: "var(--text-2)", maxWidth: 160 }}>{j.address}</td>
+                          <td className="mono">{j.zip || "—"}</td>
                           <td><StatusBadge status={j.status} /></td>
                           <td>{j.tech}</td>
                           <td className="mono" style={{ color: "var(--text-2)" }}>{fmtDate(j.scheduled)}</td>

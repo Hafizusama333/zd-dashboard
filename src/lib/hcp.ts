@@ -6,6 +6,38 @@ const KEY = process.env.HCP_API_KEY || "";
 
 type FetchOpts = { params?: Record<string, string | number | undefined>; pageLimit?: number };
 
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+// fetch with retry/backoff on HCP 429 (rate limit). Honors Retry-After when present,
+// otherwise exponential backoff. Re-throws other errors immediately.
+async function fetchWithRetry(url: string, init: RequestInit, retries = 4): Promise<Response> {
+  let attempt = 0;
+  for (;;) {
+    const res = await fetch(url, init);
+    if (res.status !== 429 || attempt >= retries) return res;
+    const ra = Number(res.headers.get("retry-after"));
+    const wait = Number.isFinite(ra) && ra > 0 ? ra * 1000 : Math.min(8000, 500 * 2 ** attempt);
+    await sleep(wait);
+    attempt++;
+  }
+}
+
+// Run `fn` over `items` with at most `limit` in flight at once — keeps us under HCP's
+// rate limit instead of firing N parallel requests via Promise.all.
+export async function mapPool<T, R>(items: T[], limit: number, fn: (item: T, idx: number) => Promise<R>): Promise<R[]> {
+  const out = new Array<R>(items.length);
+  let next = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    for (;;) {
+      const i = next++;
+      if (i >= items.length) return;
+      out[i] = await fn(items[i], i);
+    }
+  });
+  await Promise.all(workers);
+  return out;
+}
+
 async function hcpFetch<T = unknown>(path: string, opts: FetchOpts = {}): Promise<T> {
   if (!KEY) throw new Error("HCP_API_KEY missing");
   const url = new URL(path.startsWith("http") ? path : `${BASE}${path}`);
@@ -14,7 +46,7 @@ async function hcpFetch<T = unknown>(path: string, opts: FetchOpts = {}): Promis
       if (v !== undefined && v !== null && v !== "") url.searchParams.set(k, String(v));
     }
   }
-  const res = await fetch(url.toString(), {
+  const res = await fetchWithRetry(url.toString(), {
     method: "GET",
     headers: {
       Authorization: `Token ${KEY}`,
@@ -105,7 +137,7 @@ export async function hcpFetchJobsScheduled<T = unknown>(
     // work_status is a repeated array param: work_status[]=completed
     for (const ws of workStatuses) url.searchParams.append("work_status[]", ws);
 
-    const res = await fetch(url.toString(), {
+    const res = await fetchWithRetry(url.toString(), {
       headers: { Authorization: `Token ${KEY}`, Accept: "application/json" },
       cache: "no-store",
     });
