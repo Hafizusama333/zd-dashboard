@@ -16,6 +16,7 @@ type RawRow = {
   "Amount (cantidad)"?: unknown;
   "Pics sent (fotos enviadas)"?: unknown;
   Paid?: unknown;
+  "Invoice Number"?: unknown;
   "Column 1"?: unknown;
 };
 
@@ -28,6 +29,7 @@ export type APRow = {
   amount: string;
   picsSent: boolean;
   paid: boolean;
+  invoiceNumber: string;
 };
 
 // Sheet cells can come back as number/boolean/null, not just string.
@@ -51,6 +53,7 @@ function normalize(raw: RawRow): APRow {
     amount: str(raw["Amount (cantidad)"]),
     picsSent: toBool(raw["Pics sent (fotos enviadas)"]),
     paid: toBool(raw.Paid),
+    invoiceNumber: str(raw["Invoice Number"]),
   };
 }
 

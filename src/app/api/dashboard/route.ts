@@ -65,8 +65,13 @@ export async function GET(req: Request) {
   const spanDays = Math.max(1, Math.round((rangeEndExclusive(range.end).getTime() - start.getTime()) / 86400000));
   const jobPageLimit = spanDays > 270 ? 50 : spanDays > 90 ? 25 : spanDays > 31 ? 12 : 6;
 
-  const estCreated = (e: AnyRec): string | null =>
-    (e.created_at as string) || (e.created as string) || null;
+  // Page-stop key for estimates: prefer completed_at (from work_timestamps) so recently
+  // completed estimates stay in-window for the ready-to-invoice queue even when created
+  // earlier; fall back to created_at for not-yet-completed ones.
+  const estCompletedOrCreated = (e: AnyRec): string | null => {
+    const wts = (e.work_timestamps as AnyRec) || {};
+    return (wts.completed_at as string) || (e.created_at as string) || (e.created as string) || null;
+  };
   const jobCreated = (j: AnyRec): string | null =>
     (j.created_at as string) || (j.created as string) || null;
 
@@ -74,7 +79,9 @@ export async function GET(req: Request) {
     // Job revenue earned windows by the Scheduled date (matches HCP's report); page
     // newest-first and stop once past the window.
     safe("jobs", () => hcpFetchSince<AnyRec>("/jobs", "jobs", startISO, jobScheduledDate, 100, jobPageLimit), [], errors),
-    safe("estimates", () => hcpFetchSince<AnyRec>("/estimates", "estimates", startISO, estCreated, 100, jobPageLimit), [], errors),
+    // Page newest-first by created_at, but stop by COMPLETED date so recently-completed
+    // estimates (the ready-to-invoice queue) are fully covered even if created earlier.
+    safe("estimates", () => hcpFetchSince<AnyRec>("/estimates", "estimates", startISO, estCompletedOrCreated, 100, jobPageLimit), [], errors),
     // AR = open (unpaid) invoices, server-side filtered by status. All-time, not period-scoped.
     safe("invoices", () => hcpFetchAll<AnyRec>("/invoices", "invoices", 100, 10, { "status[]": "open" }), [], errors),
     safe("customers", () => hcpFetchAll<AnyRec>("/customers", "customers", 100, 5), [], errors),

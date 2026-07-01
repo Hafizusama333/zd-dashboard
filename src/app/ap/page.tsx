@@ -15,6 +15,7 @@ type APRow = {
   amount: string;
   picsSent: boolean;
   paid: boolean;
+  invoiceNumber: string;
 };
 
 const TONES = ["av-green", "av-blue", "av-amber", "av-red"];
@@ -280,6 +281,7 @@ export default function APPage() {
                     <tr>
                       <th>Contractor</th>
                       <th>Address</th>
+                      <th>Invoice #</th>
                       <th>Invoice submission cost</th>
                       <th>Unit cost</th>
                       <th>Completed</th>
@@ -298,6 +300,7 @@ export default function APPage() {
                           </div>
                         </td>
                         <td>{r.address || "—"}</td>
+                        <td className="mono">{r.invoiceNumber || "-"}</td>
                         <td className="mono">{fmtPrice(r.amount)}</td>
                         <td className="mono">
                           {String(r.rowNumber) in costs ? (

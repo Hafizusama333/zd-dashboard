@@ -25,24 +25,33 @@ export default function EstimatesPage() {
   const estimates = data?.estimates ?? [];
   const baselines = data?.baselines ?? [];
 
-  // This pricing screen is fixed to the last 7 days, independent of the dashboard's
-  // selected range. The HCP fetch over-pulls (200+ newest estimates), so the 7-day
-  // window is always fully covered regardless of the global range.
-  const sevenDayStart = Date.now() - 7 * 86400000;
-  const createdInRange = (created: string | null): boolean => {
-    if (!created) return false;
-    const t = new Date(created).getTime();
+  // This pricing screen is fixed to the CURRENT calendar week (Monday 00:00 → now),
+  // independent of the dashboard's selected range. The HCP fetch over-pulls (200+ newest
+  // estimates), so the week window is always fully covered regardless of the global range.
+  const weekStart = (() => {
+    const d = new Date();
+    const dow = (d.getDay() + 6) % 7; // 0 = Monday
+    d.setHours(0, 0, 0, 0);
+    d.setDate(d.getDate() - dow);
+    return d.getTime();
+  })();
+  const inThisWeek = (iso: string | null): boolean => {
+    if (!iso) return false;
+    const t = new Date(iso).getTime();
     if (!Number.isFinite(t)) return false;
-    return t >= sevenDayStart;
+    return t >= weekStart;
   };
 
   // Client priority: unscheduled (not attended) and completed (visited, need invoice).
   // Oldest first so the longest-standing rise to the top.
   const unscheduled = estimates
-    .filter((e) => e.bucket === "unscheduled" && createdInRange(e.created))
+    .filter((e) => e.bucket === "unscheduled" && inThisWeek(e.created))
     .sort((a, b) => b.hoursWaiting - a.hoursWaiting);
+  // Ready-to-invoice = estimates COMPLETED (visited) this calendar week, not yet invoiced.
+  // Scope by completed_at, not created_at: an estimate created weeks ago but completed this
+  // week belongs here (matches the HCP board's Completed / Ready-to-Send columns).
   const completedNeedInvoice = estimates
-    .filter((e) => e.bucket === "completed" && createdInRange(e.created))
+    .filter((e) => e.bucket === "completed" && inThisWeek(e.completedAt))
     .sort((a, b) => b.hoursWaiting - a.hoursWaiting);
 
   const unscheduledStale = unscheduled.filter((e) => e.hoursWaiting >= 72).length;
@@ -57,11 +66,11 @@ export default function EstimatesPage() {
             <DataSourceTooltip
               source="HousecallPro /estimates via /api/dashboard"
               filters={[
-                "Estimates created in the last 7 days (paged newest-first by created_at)",
+                "Estimates from the current week (paged newest-first by created_at)",
                 "Bucketed: unscheduled (not attended) vs completed (need invoice)",
                 "Conversion: created-in-range estimates that became jobs",
               ]}
-              time="Last 7 days"
+              time="This week"
             />
           </div>
           <div className="kpi-grid">
@@ -96,11 +105,11 @@ export default function EstimatesPage() {
                   source="HousecallPro /estimates via /api/dashboard"
                   filters={[
                     "bucket = unscheduled (not yet attended)",
-                    "Created in the last 7 days",
+                    "Created this week",
                     "Sorted by hours waiting (desc), first 30",
                     "AI price check vs service baselines",
                   ]}
-                  time="Last 7 days"
+                  time="This week"
                 />
               </span>
               <span className="badge badge-red">Oldest first</span>
@@ -143,15 +152,15 @@ export default function EstimatesPage() {
           <div className="card section-gap">
             <div className="card-header">
               <span className="card-title">
-                Completed Estimates — Awaiting Invoice
+                Completed Estimates — Ready to Invoice
                 <DataSourceTooltip
                   source="HousecallPro /estimates via /api/dashboard"
                   filters={[
                     "bucket = completed (visited, not yet invoiced)",
-                    "Created in the last 7 days",
+                    "Completed this week",
                     "Sorted by hours waiting (desc), first 30",
                   ]}
-                  time="Last 7 days"
+                  time="This week"
                 />
               </span>
               <span style={{ fontSize: 11, color: "var(--text-2)" }}>Visited · ready to invoice</span>
@@ -165,7 +174,7 @@ export default function EstimatesPage() {
                 </thead>
                 <tbody>
                   {completedNeedInvoice.length === 0 ? (
-                    <tr><td colSpan={7} className="empty">{data ? "None awaiting invoice" : "Loading..."}</td></tr>
+                    <tr><td colSpan={7} className="empty">{data ? "None ready to invoice" : "Loading..."}</td></tr>
                   ) : (
                     completedNeedInvoice.slice(0, 30).map((e) => {
                       const stale = e.hoursWaiting >= 72;

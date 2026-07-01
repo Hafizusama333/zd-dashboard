@@ -244,6 +244,8 @@ export function normalizeEstimate(raw: AnyRec): Estimate {
     0,
   );
   const created = (pick(raw, "created_at", "created") as string) || null;
+  const workTimestamps = pick<AnyRec>(raw, "work_timestamps") || {};
+  const completedAt = (pick(workTimestamps, "completed_at") as string) || null;
   const daysSinceSent = created
     ? Math.max(0, Math.floor((Date.now() - new Date(created).getTime()) / 86400000))
     : 0;
@@ -265,6 +267,7 @@ export function normalizeEstimate(raw: AnyRec): Estimate {
     zip: zipOf(address),
     created,
     updated: (pick(raw, "updated_at", "updated") as string) || null,
+    completedAt,
     daysSinceSent,
     hoursWaiting: hoursSince(created),
     bucket: estimateBucket(status),
@@ -309,7 +312,8 @@ export function computeConversion(estimates: Estimate[], range: DateRange): numb
 function estimateBucket(status: string): import("./types").EstimateBucket {
   if (status === "needs_scheduling") return "unscheduled";
   if (status === "scheduled" || status === "in_progress") return "scheduled";
-  if (status.startsWith("complete")) return "completed";
+  // "ready_to_send" (visited, invoice ready but not sent) is also awaiting invoice.
+  if (status.startsWith("complete") || status === "ready_to_send") return "completed";
   if (status === "created_job_from_estimate") return "won";
   if (status.includes("cancel")) return "canceled";
   return "other";

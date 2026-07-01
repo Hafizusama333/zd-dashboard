@@ -8,16 +8,28 @@ import StatusBadge from "@/components/StatusBadge";
 import { fmtDate, fmtMoney } from "@/lib/format";
 import type { Job } from "@/lib/types";
 
-type Filter = "all" | "in_progress" | "needs_scheduling" | "scheduled" | "completed";
+type Filter = "all" | "in_progress" | "needs_scheduling" | "scheduled" | "completed" | "ready_to_invoice";
 
 const fmtAge = (hours: number): string =>
   hours <= 0 ? "—" : hours >= 48 ? `${Math.floor(hours / 24)}d` : `${Math.round(hours)}h`;
 
 export default function JobsPage() {
-  const { data } = useDashboard();
+  const { data, range } = useDashboard();
   const jobs = data?.jobs ?? [];
   const clusters = data?.routeClusters ?? [];
   const [filter, setFilter] = useState<Filter>("all");
+
+  // "Ready to Invoice" = completed / needs-invoicing jobs whose completion falls inside the
+  // dashboard's selected date range, so changing the range updates the list accordingly.
+  const rangeStartMs = new Date(`${range.start}T00:00:00`).getTime();
+  const rangeEndMs = new Date(`${range.end}T23:59:59.999`).getTime();
+  const readyToInvoice = (j: Job): boolean => {
+    const done = j.status.startsWith("complete") || j.status.includes("invoic");
+    if (!done) return false;
+    if (!j.completedAt) return false;
+    const t = new Date(j.completedAt).getTime();
+    return Number.isFinite(t) && t >= rangeStartMs && t <= rangeEndMs;
+  };
 
   const filterFn = (j: Job): boolean => {
     if (filter === "all") return true;
@@ -25,6 +37,7 @@ export default function JobsPage() {
     if (filter === "needs_scheduling") return j.status === "needs_scheduling";
     if (filter === "scheduled") return j.status === "scheduled";
     if (filter === "completed") return j.status.startsWith("complete");
+    if (filter === "ready_to_invoice") return readyToInvoice(j);
     return true;
   };
 
@@ -34,6 +47,7 @@ export default function JobsPage() {
     needs_scheduling: jobs.filter((j) => j.status === "needs_scheduling").length,
     scheduled: jobs.filter((j) => j.status === "scheduled").length,
     completed: jobs.filter((j) => j.status.startsWith("complete")).length,
+    ready_to_invoice: jobs.filter(readyToInvoice).length,
   };
 
   const needsScheduling = jobs
@@ -44,7 +58,7 @@ export default function JobsPage() {
   const filtered = jobs
     .filter(filterFn)
     .sort((a, b) =>
-      filter === "completed"
+      filter === "completed" || filter === "ready_to_invoice"
         ? new Date(b.completedAt ?? 0).getTime() - new Date(a.completedAt ?? 0).getTime()
         : 0,
     )
@@ -60,6 +74,7 @@ export default function JobsPage() {
             <FTab on={filter === "needs_scheduling"} onClick={() => setFilter("needs_scheduling")}>Needs Scheduling ({counts.needs_scheduling})</FTab>
             <FTab on={filter === "scheduled"} onClick={() => setFilter("scheduled")}>Scheduled ({counts.scheduled})</FTab>
             <FTab on={filter === "completed"} onClick={() => setFilter("completed")}>Completed ({counts.completed})</FTab>
+            <FTab on={filter === "ready_to_invoice"} onClick={() => setFilter("ready_to_invoice")}>Ready to Invoice ({counts.ready_to_invoice})</FTab>
           </div>
 
           {filter === "all" && (
@@ -205,10 +220,14 @@ export default function JobsPage() {
             <div className="card">
               <div className="card-header">
                 <span className="card-title">
-                  Filtered Jobs
+                  {filter === "ready_to_invoice" ? "Jobs — Ready to Invoice" : "Filtered Jobs"}
                   <DataSourceTooltip
                     source="HousecallPro /jobs via /api/dashboard"
-                    filters={[`status = ${filter}`, "First 50"]}
+                    filters={
+                      filter === "ready_to_invoice"
+                        ? ["status = completed / needs-invoicing", "Completed within selected range", "Sorted by completed (desc), first 50"]
+                        : [`status = ${filter}`, "First 50"]
+                    }
                     time="range"
                   />
                 </span>

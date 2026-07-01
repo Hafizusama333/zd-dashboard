@@ -30,6 +30,7 @@ export type Estimate = {
   zip: string; // service address ZIP
   created: string | null;
   updated: string | null;
+  completedAt: string | null; // work_timestamps.completed_at — when the visit finished
   daysSinceSent: number;
   hoursWaiting: number;
   bucket: EstimateBucket;
