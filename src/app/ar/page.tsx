@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import AgingRow from "@/components/AgingRow";
 import ChatPanel from "@/components/ChatPanel";
 import DataSourceTooltip from "@/components/DataSourceTooltip";
@@ -19,6 +19,8 @@ export default function ARPage() {
     : 0;
 
   const [filter, setFilter] = useState<ARFilter>("all");
+  const [page, setPage] = useState(0);
+  const PAGE_SIZE = 50;
   // HCP invoice-drafting range: fiscal-year start through today−30 (so only 30+ days due show).
   const [startDate, setStartDate] = useState("2026-01-01");
   const [endDate, setEndDate] = useState(() => {
@@ -57,6 +59,15 @@ export default function ARPage() {
     groups.sort((a, b) => b[0].daysOut - a[0].daysOut);
     return groups.flat();
   })();
+
+  const pageCount = Math.max(1, Math.ceil(grouped.length / PAGE_SIZE));
+  const clampedPage = Math.min(page, pageCount - 1);
+  const paged = grouped.slice(clampedPage * PAGE_SIZE, clampedPage * PAGE_SIZE + PAGE_SIZE);
+
+  // Reset to first page when the visible set changes.
+  useEffect(() => {
+    setPage(0);
+  }, [filter, startDate, endDate]);
 
   return (
     <div className="page">
@@ -119,7 +130,7 @@ export default function ARPage() {
                     filter === "overdue30"
                       ? `daysOverdue ≥ 30 AND due date in ${startDate} → ${endDate}`
                       : "All open invoices",
-                    "Grouped by customer, sorted by days-out (desc), first 50",
+                    "Grouped by customer, sorted by days-out (desc), paginated",
                   ]}
                   time="all-time"
                 />
@@ -156,7 +167,7 @@ export default function ARPage() {
                   {visible.length === 0 ? (
                     <tr><td colSpan={10} className="empty">{data ? "No invoices match" : "Loading..."}</td></tr>
                   ) : (
-                    grouped.slice(0, 50).map((inv) => {
+                    paged.map((inv) => {
                       const critical = inv.daysOverdue > 30;
                       return (
                         <tr key={inv.id} style={critical ? { background: "var(--red-light)" } : undefined}>
@@ -184,6 +195,24 @@ export default function ARPage() {
                 </tbody>
               </table>
             </div>
+            {grouped.length > 0 && (
+              <div style={{ padding: "12px 16px", borderTop: "1px solid var(--border)", display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap", fontSize: 12, color: "var(--text-2)" }}>
+                <span>
+                  {clampedPage * PAGE_SIZE + 1}–{Math.min(clampedPage * PAGE_SIZE + PAGE_SIZE, grouped.length)} of {grouped.length}
+                </span>
+                <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                  <button className="ftab" disabled={clampedPage === 0} onClick={() => setPage(clampedPage - 1)}
+                    style={clampedPage === 0 ? { opacity: 0.5, cursor: "not-allowed" } : undefined}>
+                    ← Prev
+                  </button>
+                  <span>Page {clampedPage + 1} of {pageCount}</span>
+                  <button className="ftab" disabled={clampedPage >= pageCount - 1} onClick={() => setPage(clampedPage + 1)}
+                    style={clampedPage >= pageCount - 1 ? { opacity: 0.5, cursor: "not-allowed" } : undefined}>
+                    Next →
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 

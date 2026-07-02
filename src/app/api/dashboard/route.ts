@@ -83,7 +83,7 @@ export async function GET(req: Request) {
     // estimates (the ready-to-invoice queue) are fully covered even if created earlier.
     safe("estimates", () => hcpFetchSince<AnyRec>("/estimates", "estimates", startISO, estCompletedOrCreated, 100, jobPageLimit), [], errors),
     // AR = open (unpaid) invoices, server-side filtered by status. All-time, not period-scoped.
-    safe("invoices", () => hcpFetchAll<AnyRec>("/invoices", "invoices", 100, 10, { "status[]": "open" }), [], errors),
+    safe("invoices", () => hcpFetchAll<AnyRec>("/invoices", "invoices", 100, 50, { "status[]": "open" }), [], errors),
     safe("customers", () => hcpFetchAll<AnyRec>("/customers", "customers", 100, 5), [], errors),
     // Exact "Job revenue earned" set: HCP server-side filters jobs by scheduled date in
     // range + work_status completed. Summing subtotal over this matches the HCP report.
