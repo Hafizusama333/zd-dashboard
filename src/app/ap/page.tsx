@@ -281,7 +281,7 @@ export default function APPage() {
                     <tr>
                       <th>Contractor</th>
                       <th>Address</th>
-                      <th>Invoice #</th>
+                      <th>Job #</th>
                       <th>Invoice submission cost</th>
                       <th>Unit cost</th>
                       <th>Completed</th>
